@@ -1,47 +1,41 @@
 import polyscope as ps
-import trimesh
+import meshio
 import os, sys
 import numpy as np
-import igl
 
-def show_mesh(file_path: str):
-    # Start polyscope
+def show_mesh_with_meshio(file_path: str):
+    # Start Polyscope
     ps.init()
 
-    # Load mesh using trimesh
-    mesh = trimesh.load_mesh(file_path)
-    
-    # Ensure the file is successfully loaded
-    if mesh.is_empty:
-        print(f"Failed to load mesh from {file_path}")
+    # Load mesh using meshio
+    mesh = meshio.read(file_path)
+
+    # Extract vertices and faces
+    vertices = mesh.points
+    faces = mesh.cells_dict.get("triangle", None)  # Extract triangle faces
+
+    if faces is None:
+        print("No triangle faces found in the mesh. Polyscope requires triangular meshes.")
         return
 
-    # Register the mesh with polyscope
+    # Register the mesh with Polyscope
     ps.register_surface_mesh(
         "Mesh Viewer",
-        mesh.vertices, 
-        mesh.faces
+        vertices,
+        faces
     )
 
     # Show the mesh in the viewer
     ps.show()
 
-# Example usage:
-# show_mesh('relative/path/to/your/file.obj')
-
+# Example usage
 def main():
-    # Check if a file path is provided as an argument
-    if len(sys.argv) < 2:
-        print("Usage: python script.py <relative/path/to/file.obj>")
-        return
+    # Change directory to script location
+    os.chdir(sys.path[0])
 
-    # Get the file path from the first argument
-    file_path = sys.argv[1]
-
-    # Show the mesh using the provided file path
-    show_mesh(file_path)
+    # Path to the mesh file
+    file_path = "bunny.obj"  # Replace with your mesh file
+    show_mesh_with_meshio(file_path)
 
 if __name__ == "__main__":
     main()
-
-
