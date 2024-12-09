@@ -1,6 +1,10 @@
 import polyfempy as pf
 import meshio
 import numpy as np
+import os, sys
+
+# master_venv on windows
+# conda_venv on linux
 
 
 def get_tetra_mesh_data(file_path):
@@ -62,6 +66,9 @@ def compute_cell_center(points, connectivity, cell_id):
 
 
 def main():
+
+    os.chdir(sys.path[0])
+
     # Load mesh using meshio
     mesh_path = "Bunny/bunny.mesh"  # Replace with actual input mesh path
     points, connectivity = get_tetra_mesh_data(mesh_path)
@@ -92,7 +99,7 @@ def main():
     # Define boundary conditions
     problem = pf.Problem()
     problem.add_dirichlet_value(id=1, value=[0.0, 0.0, 0.0])  # Fix one end
-    problem.add_neumann_value(id=2, value=[0.0, -1.0, 0.0])   # Apply downward force
+    problem.add_neumann_value(id=100, value=[0.0, -1.0, 0.0])   # Apply downward force
 
     # Assign problem and settings
     settings.set_problem(problem)
@@ -104,8 +111,8 @@ def main():
     print("Problem solved.")
 
     # Export results to visualize (VTU file)
-    solver.export_vtu("modified_bunny.vtu")
-    print("Solution exported to 'bent_bar.vtu'.")
+    solver.export_vtu("./Bunny/modified_bunny.vtu")
+    print("Solution exported to 'Bunny/modified_bunny.vtu'.")
 
 
 if __name__ == "__main__":
