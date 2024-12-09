@@ -34,7 +34,7 @@ def main():
     os.chdir(sys.path[0])
 
     # Path to the mesh file
-    file_path = "bunny.obj"  # Replace with your mesh file
+    file_path = "bunny.mesh"  # Replace with your mesh file
     show_mesh_with_meshio(file_path)
 
 if __name__ == "__main__":
