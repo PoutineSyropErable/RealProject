@@ -29,17 +29,36 @@ def get_tetra_mesh_data(file_path):
     points = mesh.points
 
     # Find tetrahedral cells
-    connectivity = None
-    for cell_block in mesh.cells:
-        if cell_block.type == "tetra":
-            connectivity = cell_block.data
-            break
+    connectivity = mesh.cells_dict.get("tetra", None)
 
     # Raise error if no tets are found
     if connectivity is None:
         raise ValueError("No tetrahedral cells found in the mesh file.")
 
     return points, connectivity
+
+
+def compute_cell_center(points, connectivity, cell_id):
+    """
+    Computes the center of a tetrahedral cell.
+
+    Args:
+        points (numpy.ndarray): Nx3 array of vertex positions.
+        connectivity (numpy.ndarray): Mx4 array of tetrahedral cell indices.
+        cell_id (int): Index of the tetrahedral cell in the connectivity.
+
+    Returns:
+        numpy.ndarray: Coordinates of the center of the specified cell.
+    """
+    # Extract the vertex indices for the given cell
+    vertex_indices = connectivity[cell_id]
+
+    # Retrieve the positions of the vertices
+    cell_vertices = points[vertex_indices]
+
+    # Compute the center as the average of the vertices
+    center = np.mean(cell_vertices, axis=0)
+    return center
 
 
 def main():
@@ -52,6 +71,9 @@ def main():
 
     print(f"\nPoints = \n{points}\n")
     print(f"\nConnectivity = \n{connectivity}\n")
+
+    center = compute_cell_center(points, connectivity, 100)
+    print(f"Center = {center}\n")
 
 
     # Initialize the PolyFEM solver
