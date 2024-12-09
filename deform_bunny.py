@@ -98,7 +98,7 @@ def main():
     # Define boundary conditions
     problem = pf.Problem()
     problem.add_dirichlet_value(id=1, value=[0.0, 0.0, 0.0])  # Fix one end
-    problem.add_neumann_value(id=100, value=[0.0, -1.0, 0.0])  # Apply downward force
+    problem.add_neumann_value(id=2455, value=[0.0, -0.1, 0.0])  # Apply downward force
 
     # Assign problem and settings
     settings.set_problem(problem)
