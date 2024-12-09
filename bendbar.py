@@ -3,59 +3,62 @@ import meshio
 import numpy as np
 
 
-def load_mesh_data(mesh_path):
+def get_tetra_mesh_data(file_path):
     """
-    Load a mesh file and return vertices and faces/cells.
+    Extracts points and tetrahedral connectivity from a mesh file.
 
     Args:
-        mesh_path (str): Path to the input mesh file.
+        file_path (str): Path to the input mesh file.
 
     Returns:
-        tuple: (vertices, faces) as numpy arrays.
-               vertices - Nx3 array of vertex coordinates.
-               faces    - MxK array of cell indices (K=3 for triangles, K=4 for tets).
+        tuple: A tuple (points, connectivity), where:
+            - points: numpy.ndarray of shape (N, 3), the mesh vertex coordinates.
+            - connectivity: numpy.ndarray of shape (M, 4), the tetrahedral cell indices.
 
     Raises:
-        ValueError: If no supported cells (triangle/tetra) are found.
+        ValueError: If no tetrahedral cells are found in the mesh.
+        FileNotFoundError: If the file does not exist.
     """
-    # Load the mesh using meshio
-    mesh = meshio.read(mesh_path)
+    # Load the mesh file
+    try:
+        mesh = meshio.read(file_path)
+    except Exception as e:
+        raise FileNotFoundError(f"Error loading mesh file: {e}")
 
-    # Extract vertices
-    vertices = mesh.points
+    # Extract points
+    points = mesh.points
 
-    # Extract faces/cells
-    faces = None
+    # Find tetrahedral cells
+    connectivity = None
     for cell_block in mesh.cells:
-        if cell_block.type == "triangle":  # For 2D meshes
-            faces = cell_block.data
-            print("Loaded triangular mesh.")
-            break
-        elif cell_block.type == "tetra":  # For 3D meshes
-            faces = cell_block.data
-            print("Loaded tetrahedral mesh.")
+        if cell_block.type == "tetra":
+            connectivity = cell_block.data
             break
 
-    # If no supported cells are found, raise an error
-    if faces is None:
-        raise ValueError("No supported cells (triangle or tetrahedral) found in the mesh file.")
+    # Raise error if no tets are found
+    if connectivity is None:
+        raise ValueError("No tetrahedral cells found in the mesh file.")
 
-    return vertices, faces
+    return points, connectivity
 
 
 def main():
     # Load mesh using meshio
-    mesh_path = "bunny.mesh"  # Replace with actual input mesh path
-    vertices, faces = load_mesh_data(mesh_path)
+    mesh_path = "Bunny/bunny.mesh"  # Replace with actual input mesh path
+    points, connectivity = get_tetra_mesh_data(mesh_path)
 
-    print(np.shape(vertices))
-    print(np.shape(faces))
+    print(f"\nPoints.shape() = {np.shape(points)}")
+    print(f"Connectivity.shape() = {np.shape(connectivity)}\n")
+
+    print(f"\nPoints = \n{points}\n")
+    print(f"\nConnectivity = \n{connectivity}\n")
+
 
     # Initialize the PolyFEM solver
     solver = pf.Solver()
 
     # Set the mesh using vertices and faces
-    solver.set_mesh(vertices=vertices, connectivity=faces, normalize_mesh=True)
+    solver.set_mesh(vertices=points, connectivity=connectivity, normalize_mesh=True)
     print("Mesh successfully loaded into PolyFEM.")
 
     # Set solver settings
@@ -79,21 +82,8 @@ def main():
     print("Problem solved.")
 
     # Export results to visualize (VTU file)
-    solver.export_vtu("bent_bar.vtu")
+    solver.export_vtu("modified_bunny.vtu")
     print("Solution exported to 'bent_bar.vtu'.")
-
-    # Get solution (displacements)
-    solution_vertices = solver.get_sampled_solution()[0]
-    print("Number of points in Solution:", len(solution_vertices))
-
-    # Export the resulting mesh using meshio
-    output_mesh = "exported_bent_bar.mesh"
-    meshio.write_points_cells(
-        output_mesh,
-        points=solution_vertices,
-        cells=[("tetra", faces)]
-    )
-    print(f"Exported the resulting mesh to: {output_mesh}")
 
 
 if __name__ == "__main__":
