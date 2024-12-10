@@ -63,6 +63,8 @@ def normalize_points(points):
     min_coords = np.min(points, axis=0)
     max_coords = np.max(points, axis=0)
 
+    print(f"\n\nDimensions= {max_coords- min_coords}\n\n")
+
     # Normalize the points to the range [0, 1]
     normalized_points = (points - min_coords) / (max_coords - min_coords)
 
@@ -657,7 +659,8 @@ def main():
     # Load mesh using meshio
     mesh_path = "Bunny/bunny.mesh"  # Replace with actual input mesh path
     points, connectivity = get_tetra_mesh_data(mesh_path)
-    points = normalize_points(points)
+    # points = normalize_points(points)
+    normalize_points(points)
 
     print(f"\nPoints.shape() = {np.shape(points)}")
     print(f"Connectivity.shape() = {np.shape(connectivity)}\n")
