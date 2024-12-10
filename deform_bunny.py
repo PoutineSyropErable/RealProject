@@ -1,5 +1,7 @@
 import polyfempy as pf
 import meshio
+import igl
+from collections import defaultdict
 import numpy as np
 import os, sys
 
@@ -64,6 +66,143 @@ def compute_cell_center(points, connectivity, cell_id):
     center = np.mean(cell_vertices, axis=0)
     return center
 
+def compute_location(points, connectivity, cell_id, barycentric_coords):
+    """
+    Computes the Cartesian coordinates of a point given its barycentric coordinates 
+    in a specified tetrahedral cell.
+
+    Args:
+        points (numpy.ndarray): Nx3 array of vertex positions.
+        connectivity (numpy.ndarray): Mx4 array of tetrahedral cell indices.
+        cell_id (int): Index of the tetrahedral cell in the connectivity.
+        barycentric_coords (list or numpy.ndarray): Barycentric coordinates [w0, w1, w2, w3].
+
+    Returns:
+        numpy.ndarray: Cartesian coordinates of the point.
+    """
+    # Extract vertex indices for the cell
+    vertex_indices = connectivity[cell_id]
+    
+    # Retrieve the positions of the vertices
+    cell_vertices = points[vertex_indices]  # Shape: (4, 3)
+    
+    # Check if barycentric coordinates sum to approximately 1
+    if not np.isclose(np.sum(barycentric_coords), 1.0):
+        raise ValueError("Barycentric coordinates must sum to 1.")
+    
+    # Compute the Cartesian coordinates using the barycentric formula. T for 
+    location = np.dot(barycentric_coords, cell_vertices)
+    
+    return location
+
+def compute_sdf_and_normals(points, connectivity, query_points):
+    """
+    Computes the signed distance field (SDF) and surface normals (from gradient of SDF)
+    for a set of query points relative to a tetrahedral mesh.
+
+    Args:
+        points (numpy.ndarray): Nx3 array of vertex positions.
+        connectivity (numpy.ndarray): Mx4 array of tetrahedral cell indices.
+        query_points (numpy.ndarray): Qx3 array of points where SDF and normals are computed.
+
+    Returns:
+        tuple: A tuple (sdf, normals) where:
+            - sdf: Qx1 numpy.ndarray of signed distances.
+            - normals: Qx3 numpy.ndarray of normalized surface normals.
+    """
+    # Convert tetrahedral mesh to triangular surface mesh
+    V = points  # Vertices of the mesh
+    T = connectivity  # Tetrahedral cell connectivity
+
+    # Extract surface triangular mesh
+    F = igl.boundary_facets(T)
+
+    # Compute the SDF and gradients
+    sdf, normals, _ = igl.signed_distance(query_points, V, F, return_normals=True)
+
+    # Normalize the normals (to ensure unit length)
+    normals = normals / np.linalg.norm(normals, axis=1, keepdims=True)
+
+    return sdf, normals
+
+def compute_sdf_and_normal_single_point(points, connectivity, query_point):
+    """
+    Computes the signed distance field (SDF) and surface normal (gradient of SDF)
+    for a single query point relative to a tetrahedral mesh.
+
+    Args:
+        points (numpy.ndarray): Nx3 array of vertex positions.
+        connectivity (numpy.ndarray): Mx4 array of tetrahedral cell indices.
+        query_point (numpy.ndarray): 1x3 array representing the point to query.
+
+    Returns:
+        tuple: A tuple (sdf, normal) where:
+            - sdf: Signed distance as a float.
+            - normal: 1x3 numpy.ndarray of the normalized surface normal.
+    """
+    # Convert tetrahedral mesh to triangular surface mesh
+    V = points  # Vertices of the mesh
+    T = connectivity  # Tetrahedral cell connectivity
+
+    # Extract surface triangular mesh
+    F = igl.boundary_facets(T)
+
+    # Ensure query_point is a 2D array of shape (1, 3)
+    query_point = np.array(query_point).reshape(1, 3)
+
+    # Compute the SDF and normal for the single point
+    sdf, normals, _ = igl.signed_distance(query_point, V, F, return_normals=True)
+
+    # Normalize the normal (ensure it's a unit vector)
+    normal = normals[0] / np.linalg.norm(normals[0])
+
+    return sdf[0], normal
+
+def find_surface_cells(points, connectivity):
+    """
+    Finds the surface triangular faces and the bordering tetrahedral cells in a tetrahedral mesh.
+
+    Args:
+        points (numpy.ndarray): Nx3 array of vertex positions.
+        connectivity (numpy.ndarray): Mx4 array of tetrahedral cell indices.
+
+    Returns:
+        tuple:
+            - surface_faces: List of unique surface triangular faces.
+            - surface_cells: Set of indices of tetrahedral cells that share surface faces.
+    """
+    face_count = defaultdict(int)  # Track the number of times each face appears
+    face_to_cell = defaultdict(list)  # Map faces to the tetrahedral cells they belong to
+
+    # Function to sort a face (ensures consistent representation)
+    def sorted_face(v1, v2, v3):
+        return tuple(sorted([v1, v2, v3]))
+
+    # Iterate over all tetrahedral cells
+    for cell_idx, cell in enumerate(connectivity):
+        # Extract the 4 faces of the tetrahedron
+        faces = [
+            sorted_face(cell[0], cell[1], cell[2]),
+            sorted_face(cell[0], cell[1], cell[3]),
+            sorted_face(cell[0], cell[2], cell[3]),
+            sorted_face(cell[1], cell[2], cell[3]),
+        ]
+
+        # Update the face count and map faces to cells
+        for face in faces:
+            face_count[face] += 1
+            face_to_cell[face].append(cell_idx)
+
+    # Identify faces that appear only once (surface faces)
+    surface_faces = [face for face, count in face_count.items() if count == 1]
+
+    # Identify cells that share these surface faces
+    surface_cells = set()
+    for face in surface_faces:
+        surface_cells.update(face_to_cell[face])
+
+    return surface_faces, surface_cells
+
 
 def main():
 
@@ -72,6 +211,10 @@ def main():
     # Load mesh using meshio
     mesh_path = "Bunny/bunny.mesh"  # Replace with actual input mesh path
     points, connectivity = get_tetra_mesh_data(mesh_path)
+
+    surface_face, surface_cells = find_surface_cells(points, connectivity)
+
+    print(f"The surface cells are: \n{surface_cells}\n")
 
     print(f"\nPoints.shape() = {np.shape(points)}")
     print(f"Connectivity.shape() = {np.shape(connectivity)}\n")
