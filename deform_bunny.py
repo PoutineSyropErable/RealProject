@@ -4,6 +4,7 @@ import igl
 from collections import defaultdict
 import numpy as np
 import os, sys
+import pyvista as pv
 
 # master_venv on windows
 # conda_venv on linux
@@ -43,6 +44,53 @@ def get_tetra_mesh_data(file_path):
 
     return points, connectivity
 
+def extract_surface_mesh(points, connectivity):
+    """
+    Extracts the surface triangular mesh from a tetrahedral mesh using PyVista.
+
+    Args:
+        points (numpy.ndarray): Nx3 array of vertex positions.
+        connectivity (numpy.ndarray): Mx4 array of tetrahedral cell indices.
+
+    Returns:
+        tuple: (surface_points, surface_faces)
+            - surface_points: Nx3 array of vertex positions.
+            - surface_faces: Kx3 array of triangular face indices.
+    """
+    # Add cell sizes as a prefix to the connectivity
+    cells = np.hstack([[4, *tet] for tet in connectivity])  # Prefix 4 indicates tetrahedron
+    cell_types = [pv.CellType.TETRA] * len(connectivity)
+
+    # Create an unstructured grid using PyVista
+    grid = pv.UnstructuredGrid(cells, cell_types, points)
+
+    # Extract the surface mesh
+    surface_mesh = grid.extract_surface()
+
+    # Surface points and faces
+    surface_points = surface_mesh.points
+    surface_faces = surface_mesh.faces.reshape(-1, 4)[:, 1:]  # Drop the face size prefix
+
+    return surface_points, surface_faces
+
+def compute_sdf_and_normals(points, faces, query_points):
+    """
+    Computes the signed distance field (SDF) and surface normals at query points.
+    Args:
+        points (numpy.ndarray): Nx3 array of vertex positions.
+        faces (numpy.ndarray): Mx3 array of surface triangle indices.
+        query_points (numpy.ndarray): Qx3 array of points where SDF and normals are computed.
+    Returns:
+        tuple: SDF values and normals at query points.
+    """
+    # Compute SDF and normals using libigl
+    sdf, _, normals = igl.signed_distance(query_points, points, faces, return_normals=True)
+
+    # Normalize normals
+    normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+
+    return sdf, normals
+
 
 def compute_cell_center(points, connectivity, cell_id):
     """
@@ -65,6 +113,8 @@ def compute_cell_center(points, connectivity, cell_id):
     # Compute the center as the average of the vertices
     center = np.mean(cell_vertices, axis=0)
     return center
+
+
 
 def compute_cells_center(points, connectivity, cell_ids):
     """
@@ -118,68 +168,8 @@ def compute_location(points, connectivity, cell_id, barycentric_coords):
     
     return location
 
-def compute_sdf_and_normals(points, connectivity, query_points):
-    """
-    Computes the signed distance field (SDF) and surface normals (from gradient of SDF)
-    for a set of query points relative to a tetrahedral mesh.
 
-    Args:
-        points (numpy.ndarray): Nx3 array of vertex positions.
-        connectivity (numpy.ndarray): Mx4 array of tetrahedral cell indices.
-        query_points (numpy.ndarray): Qx3 array of points where SDF and normals are computed.
 
-    Returns:
-        tuple: A tuple (sdf, normals) where:
-            - sdf: Qx1 numpy.ndarray of signed distances.
-            - normals: Qx3 numpy.ndarray of normalized surface normals.
-    """
-    # Convert tetrahedral mesh to triangular surface mesh
-    V = points  # Vertices of the mesh
-    T = connectivity  # Tetrahedral cell connectivity
-
-    # Extract surface triangular mesh
-    F = igl.boundary_facets(T)
-
-    # Compute the SDF and gradients
-    sdf, normals, _ = igl.signed_distance(query_points, V, F, return_normals=True)
-
-    # Normalize the normals (to ensure unit length)
-    normals = normals / np.linalg.norm(normals, axis=1, keepdims=True)
-
-    return sdf, normals
-
-def compute_sdf_and_normal_single_point(points, connectivity, query_point):
-    """
-    Computes the signed distance field (SDF) and surface normal (gradient of SDF)
-    for a single query point relative to a tetrahedral mesh.
-
-    Args:
-        points (numpy.ndarray): Nx3 array of vertex positions.
-        connectivity (numpy.ndarray): Mx4 array of tetrahedral cell indices.
-        query_point (numpy.ndarray): 1x3 array representing the point to query.
-
-    Returns:
-        tuple: A tuple (sdf, normal) where:
-            - sdf: Signed distance as a float.
-            - normal: 1x3 numpy.ndarray of the normalized surface normal.
-    """
-    # Convert tetrahedral mesh to triangular surface mesh
-    V = points  # Vertices of the mesh
-    T = connectivity  # Tetrahedral cell connectivity
-
-    # Extract surface triangular mesh
-    F = igl.boundary_facets(T)
-
-    # Ensure query_point is a 2D array of shape (1, 3)
-    query_point = np.array(query_point).reshape(1, 3)
-
-    # Compute the SDF and normal for the single point
-    sdf, normals, _ = igl.signed_distance(query_point, V, F, return_normals=True)
-
-    # Normalize the normal (ensure it's a unit vector)
-    normal = normals[0] / np.linalg.norm(normals[0])
-
-    return sdf[0], normal
 
 def find_surface_cells(points, connectivity):
     """
@@ -223,6 +213,9 @@ def find_surface_cells(points, connectivity):
     surface_cells = set()
     for face in surface_faces:
         surface_cells.update(face_to_cell[face])
+
+    surface_cells = np.array(list(surface_cells)) 
+    surface_faces = np.array(surface_faces) 
 
     return surface_faces, surface_cells
 
@@ -301,6 +294,12 @@ def main():
     mesh_center_cell_id = find_closest_cell(points, connectivity, mesh_center)
     print(f"mesh_center_cell_id = {mesh_center_cell_id}")
 
+    SOME_BORDER_CELL_INDEX_IN_ARRAY = 0
+    some_border_cell_id = surface_cells[SOME_BORDER_CELL_INDEX_IN_ARRAY]
+    some_border_cell_position = surface_cells_center[SOME_BORDER_CELL_INDEX_IN_ARRAY]
+    some_border_cell_sdf = sdfs_surface[SOME_BORDER_CELL_INDEX_IN_ARRAY]
+    some_border_cell_normal = normals_surface[SOME_BORDER_CELL_INDEX_IN_ARRAY]
+
     
 
 
@@ -325,11 +324,7 @@ def main():
     problem = pf.Problem()
     problem.add_dirichlet_value(id= mesh_center_cell_id, value=[0.0, 0.0, 0.0])  # Fix the center
 
-    SOME_BORDER_CELL_INDEX_IN_ARRAY = 0
-    some_border_cell_id = surface_cells[SOME_BORDER_CELL_INDEX_IN_ARRAY]
-    some_border_cell_position = surface_cells_center[SOME_BORDER_CELL_INDEX_IN_ARRAY]
-    some_border_cell_sdf = sdfs_surface[SOME_BORDER_CELL_INDEX_IN_ARRAY]
-    some_border_cell_normal = normals_surface[SOME_BORDER_CELL_INDEX_IN_ARRAY]
+
 
 
 
