@@ -420,7 +420,7 @@ def debug_array_info(array, array_name):
 
     print("\n\n\n\n\n")
 
-def get_deformed_mesh(solver, points):
+def get_deformed_mesh(solver):
     """
     Retrieves the deformed mesh from the PolyFEM solver.
 
@@ -437,13 +437,52 @@ def get_deformed_mesh(solver, points):
     debug_array_info(displacement, "displacement")
 
 
-
-
-
     # Add displacement to original vertices to get the deformed mesh
     displaced_points = points + displacement
 
     return displaced_points, connectivity
+
+class MyMesh:
+    """
+    Custom mesh structure to store points and connectivity.
+    """
+    def __init__(self, points, connectivity):
+        self.points = points
+        self.connectivity = connectivity
+
+    def __repr__(self):
+        return f"MyMesh(points.shape={self.points.shape}, connectivity.shape={self.connectivity.shape})"
+
+def get_deformed_mesh_frames(solver):
+    """
+    Retrieves the deformed mesh for each time frame from the PolyFEM solver.
+
+    Args:
+        solver (pf.Solver): PolyFEM solver instance after solving.
+
+    Returns:
+        list[MyMesh]: List of MyMesh objects, each containing deformed vertex positions
+                      and the connectivity for each time frame.
+    """
+    # Retrieve all time frame solutions
+    solution_frames = solver.get_sampled_solution_frames()
+    my_mesh_frames = []
+
+    print(f"Number of time frames: {len(solution_frames)}")
+    for frame_idx, (points, connectivity, displacement) in enumerate(solution_frames):
+        print(f"Processing time frame {frame_idx + 1}...")
+
+        # Compute the deformed points for this frame
+        displaced_points = points + displacement
+        name = f"displacement, frame_idx: {frame_idx}"
+        debug_array_info(displacement, name)
+
+        # Create a MyMesh instance for this frame
+        my_mesh = MyMesh(points=displaced_points, connectivity=connectivity)
+        my_mesh_frames.append(my_mesh)
+
+    print("All time frames processed successfully.")
+    return my_mesh_frames
 
 def setup_and_solve_polyfem(shape_info, border_cell_index, total_time=1.0, dt=0.01, force_norm = 1, phi=0, theta =0):
     """
@@ -519,8 +558,11 @@ def setup_and_solve_polyfem(shape_info, border_cell_index, total_time=1.0, dt=0.
     print("Mesh successfully loaded into PolyFEM.")
 
     # Set solver settings
-    settings = pf.Settings(discr_order=1, pressure_discr_order=1, pde='LinearElasticity', nl_solver_rhs_steps=1, tend=10, time_steps=1000)
+    time_steps = int(total_time/dt)
+    print(f"\nThe number of time steps: {time_steps}\n")
+    settings = pf.Settings(discr_order=1, pressure_discr_order=1, pde='LinearElasticity', nl_solver_rhs_steps=1, tend=total_time, time_steps=time_steps)
     settings.set_pde(pf.PDEs.LinearElasticity)  # Linear Elasticity problem
+    settings.time_dependent = True
     settings.set_material_params("E", 210000)
     settings.set_material_params("nu", 0.3)
 
@@ -552,7 +594,19 @@ def setup_and_solve_polyfem(shape_info, border_cell_index, total_time=1.0, dt=0.
         solver.export_vtu(filename)
         print(f"\n\nSolution exported to '{filename}' .")
 
-    displaced_points, new_connectivity = get_deformed_mesh(solver, shape_info.points)
+    displaced_points, new_connectivity = get_deformed_mesh(solver)
+
+    TEST_TIME = False
+    if TEST_TIME:
+        mesh_array = get_deformed_mesh_frames(solver)
+
+        print("\n\n\n\n")
+        print("The mesh array has:",len(mesh_array),"elements")
+
+        displaced_points = mesh_array[0].points
+        new_connectivity = mesh_array[0].connectivity
+
+
     print("Deformed mesh vertices retrieved successfully.")
 
     return displaced_points, new_connectivity, some_border_cell_position, force_on_some_border_cell
@@ -703,7 +757,7 @@ def main():
     shape_info = ShapeInfo(points, connectivity, surface_cells, surface_cells_center, sdfs_surface, normals_surface)
 
     # Call the solver setup function
-    deformed_points, deformed_connectivity, deformation_point, force = setup_and_solve_polyfem(shape_info, border_cell_index=10, force_norm=100)
+    deformed_points, deformed_connectivity, deformation_point, force = setup_and_solve_polyfem(shape_info, border_cell_index=10, force_norm=100, total_time= 1.0, dt= 0.01)
 
 
     # Print all deformed vertices
