@@ -1,4 +1,3 @@
-import polyfempy as pf
 import meshio
 import igl
 from collections import defaultdict
@@ -8,8 +7,14 @@ import pyvista as pv
 import polyscope as ps
 from scipy.spatial import KDTree
 import time
-from dolfin import *
 
+from dolfinx import mesh, fem
+
+
+from dolfinx import mesh, fem, io, nls, la
+from ufl import inner, grad, sym, Identity, tr, Measure, TestFunction, TrialFunction, FunctionSpace, dot, conditional
+from mpi4py import MPI
+from petsc4py import PETSc
 
 np.set_printoptions(suppress=True, precision=8)
 
@@ -75,6 +80,7 @@ def normalize_points(points):
 
     return normalized_points
 
+
 def extract_surface_mesh(points, connectivity):
     """
     Extracts the surface triangular mesh from a tetrahedral mesh using PyVista.
@@ -104,6 +110,7 @@ def extract_surface_mesh(points, connectivity):
 
     return surface_points, surface_faces
 
+
 def compute_sdf_and_normals(points, faces, query_points):
     """
     Computes the signed distance field (SDF) and surface normals at query points.
@@ -115,8 +122,8 @@ def compute_sdf_and_normals(points, faces, query_points):
         tuple: SDF values and normals at query points.
     """
     # Ensure data types are correct
-    points = points.astype(np.float64)       # Vertex positions
-    faces = faces.astype(np.int32)           # Triangle indices
+    points = points.astype(np.float64)  # Vertex positions
+    faces = faces.astype(np.int32)  # Triangle indices
     query_points = query_points.astype(np.float64)  # Query points
 
     # Print the input arrays for debugging
@@ -136,7 +143,7 @@ def compute_sdf_and_normals(points, faces, query_points):
     sdf = output[0]  # Signed distances
     indices = output[1]  # Indices of closest faces
     closest_points = output[2]  # Closest points on the mesh
-    normals = output[3]  # 
+    normals = output[3]  #
 
     # Print the results in a formatted way
     print("\n--- Signed Distance Output ---\n")
@@ -144,7 +151,6 @@ def compute_sdf_and_normals(points, faces, query_points):
     print(f"Closest Face Indices:\n{np.array2string(indices, separator=', ', threshold=10)}\n")
     print(f"Closest Points on Mesh:\n{np.array2string(closest_points, precision=4, separator=', ', threshold=10)}\n")
     print(f"Normals :\n{np.array2string(normals, precision=4, separator=', ', threshold=10)}\n")
-
 
     # Normalize normals to ensure unit vectors
     normals /= np.linalg.norm(normals, axis=1, keepdims=True)
@@ -175,7 +181,6 @@ def compute_cell_center(points, connectivity, cell_id):
     return center
 
 
-
 def compute_cells_center(points, connectivity, cell_ids):
     """
     Computes the centers of multiple tetrahedral cells.
@@ -199,9 +204,10 @@ def compute_cells_center(points, connectivity, cell_ids):
 
     return centers
 
+
 def compute_location(points, connectivity, cell_id, barycentric_coords):
     """
-    Computes the Cartesian coordinates of a point given its barycentric coordinates 
+    Computes the Cartesian coordinates of a point given its barycentric coordinates
     in a specified tetrahedral cell.
 
     Args:
@@ -215,20 +221,18 @@ def compute_location(points, connectivity, cell_id, barycentric_coords):
     """
     # Extract vertex indices for the cell
     vertex_indices = connectivity[cell_id]
-    
+
     # Retrieve the positions of the vertices
     cell_vertices = points[vertex_indices]  # Shape: (4, 3)
-    
+
     # Check if barycentric coordinates sum to approximately 1
     if not np.isclose(np.sum(barycentric_coords), 1.0):
         raise ValueError("Barycentric coordinates must sum to 1.")
-    
-    # Compute the Cartesian coordinates using the barycentric formula. T for 
+
+    # Compute the Cartesian coordinates using the barycentric formula. T for
     location = np.dot(barycentric_coords, cell_vertices)
-    
+
     return location
-
-
 
 
 def find_surface_cells(points, connectivity):
@@ -274,8 +278,8 @@ def find_surface_cells(points, connectivity):
     for face in surface_faces:
         surface_cells.update(face_to_cell[face])
 
-    surface_cells = np.array(list(surface_cells)) 
-    surface_faces = np.array(surface_faces) 
+    surface_cells = np.array(list(surface_cells))
+    surface_faces = np.array(surface_faces)
 
     return surface_faces, surface_cells
 
@@ -301,6 +305,7 @@ def compute_mesh_center(points, connectivity):
     mesh_center = np.mean(cell_centers, axis=0)  # Shape: (3,)
 
     return mesh_center
+
 
 def find_closest_cell(points, connectivity, target_point):
     """
@@ -333,6 +338,7 @@ class ShapeInfo:
     """
     A class to store all mesh-related shape information.
     """
+
     def __init__(self, points, connectivity, surface_cells, surface_cells_center, sdfs_surface, normals_surface):
         self.points = points
         self.connectivity = connectivity
@@ -341,10 +347,10 @@ class ShapeInfo:
         self.sdfs_surface = sdfs_surface
         self.normals_surface = normals_surface
 
-        
+
 def rotate_vector_phi_theta(vector, phi, theta):
     """
-    Rotates a 3D vector by phi degrees around the Z-axis and then theta degrees 
+    Rotates a 3D vector by phi degrees around the Z-axis and then theta degrees
     from the Z-axis (elevation).
 
     Args:
@@ -356,22 +362,14 @@ def rotate_vector_phi_theta(vector, phi, theta):
         numpy.ndarray: Rotated 3D vector.
     """
     # Convert degrees to radians
-    phi_rad = np.radians(phi)      # Rotation around Z-axis
+    phi_rad = np.radians(phi)  # Rotation around Z-axis
     theta_rad = np.radians(theta)  # Tilt from Z-axis
 
     # Rotation matrix around Z-axis (phi)
-    rot_z = np.array([
-        [np.cos(phi_rad), -np.sin(phi_rad), 0],
-        [np.sin(phi_rad), np.cos(phi_rad),  0],
-        [0,               0,                1]
-    ])
+    rot_z = np.array([[np.cos(phi_rad), -np.sin(phi_rad), 0], [np.sin(phi_rad), np.cos(phi_rad), 0], [0, 0, 1]])
 
     # Rotation matrix for tilt from Z-axis (theta)
-    rot_theta = np.array([
-        [np.cos(theta_rad), 0, np.sin(theta_rad)],
-        [0,                1, 0],
-        [-np.sin(theta_rad), 0, np.cos(theta_rad)]
-    ])
+    rot_theta = np.array([[np.cos(theta_rad), 0, np.sin(theta_rad)], [0, 1, 0], [-np.sin(theta_rad), 0, np.cos(theta_rad)]])
 
     # Combine the rotations: Z-axis rotation first, then tilt
     combined_rotation = rot_theta @ rot_z
@@ -380,6 +378,7 @@ def rotate_vector_phi_theta(vector, phi, theta):
     rotated_vector = combined_rotation @ vector
 
     return rotated_vector
+
 
 def debug_array_info(array, array_name):
     """
@@ -422,6 +421,7 @@ def debug_array_info(array, array_name):
 
     print("\n\n\n\n\n")
 
+
 def get_deformed_mesh(solver, points):
     """
     Retrieves the deformed mesh from the PolyFEM solver.
@@ -438,227 +438,90 @@ def get_deformed_mesh(solver, points):
 
     debug_array_info(displacement, "displacement")
 
-
-
-
-
     # Add displacement to original vertices to get the deformed mesh
     displaced_points = points + displacement
 
     return displaced_points, connectivity
 
-def setup_and_solve_polyfem(shape_info, border_cell_index, total_time=1.0, dt=0.01, force_norm = 1, phi=0, theta =0):
+
+def setup_and_solve_dolphinx(shape_info, border_cell_index, force_norm=1):
     """
-    Sets up and solves the PolyFEM problem for a given mesh with forces applied to a specified border cell.
-
-    Args:
-        shape_info (ShapeInfo): Contains all mesh-related data.
-        border_cell_index (int): Index of the border cell to apply the force.
-        force_norm (float): Magnitude of the force to apply.
-
-    Returns:
-        None
-    """
-
-    # Extract the border cell data from ShapeInfo
-    some_border_cell_id = int(shape_info.surface_cells[border_cell_index])
-    some_border_cell_position = shape_info.surface_cells_center[border_cell_index]
-    some_border_cell_sdf = shape_info.sdfs_surface[border_cell_index]
-    some_border_cell_normal = shape_info.normals_surface[border_cell_index]
-
-    # Compute the force to apply
-    INWARD_FORCE_MULTIPLIER = -1
-    force_on_some_border_cell = INWARD_FORCE_MULTIPLIER * force_norm * some_border_cell_normal
-    force_on_some_border_cell = rotate_vector_phi_theta(force_on_some_border_cell, phi, theta)
-    force_on_some_border_cell = list(force_on_some_border_cell)
-
-
-
-    # Print debug information
-    print(f"\nTaking the {border_cell_index}th Border Cell")
-    print(f"some_border_cell_id = {some_border_cell_id}")
-    print(f"some_border_cell_position = {some_border_cell_position}")
-    print(f"some_border_cell_sdf = {some_border_cell_sdf:.4f}")
-    print(f"some_border_cell_normal = {some_border_cell_normal}")
-    print(f"force_on_some_border_cell = {force_on_some_border_cell}")
-
-    # Compute mesh center and closest cell
-    mesh_center = compute_mesh_center(shape_info.points, shape_info.connectivity)
-    mesh_center_cell_id = find_closest_cell(shape_info.points, shape_info.connectivity, mesh_center)
-
-    # Find closest vertices to fixed_point and force_point using KDTree
-    kdtree = KDTree(shape_info.points)
-    fixed_vertex_id = kdtree.query(mesh_center)[1]
-    force_vertex_id = kdtree.query(some_border_cell_position)[1]
-
-
-    # Define a marker function to assign sideset IDs dynamically
-    def marker_function(v_ids, is_boundary):
-        """
-        Tag:
-        - Sideset 1 for the fixed point.
-        - Sideset 2 for the force application point.
-        """
-        if fixed_vertex_id in v_ids:
-            return 1  # Sideset ID 1 for fixing displacement
-        elif force_vertex_id in v_ids:
-            return 2  # Sideset ID 2 for applying force
-        return 0  # Default (no tag
-
-    print("\n\n\n_______COMPUTED FORCES_______________\n\n")
-    center = compute_cell_center(shape_info.points, shape_info.connectivity, mesh_center_cell_id)
-    print("__ The center won't move __")
-    print(f"mesh_center_cell_id = {mesh_center_cell_id}")
-    print(f"Center = {center}")
-
-    print("\n\n\n_______START OF SOLVER_______________\n\n")
-    
-    # Initialize the PolyFEM solver
-    solver = pf.Solver()
-
-    # Set the mesh using vertices and faces
-    solver.set_mesh(vertices=shape_info.points, connectivity=shape_info.connectivity, normalize_mesh=True)
-    print("Mesh successfully loaded into PolyFEM.")
-
-    # Set solver settings
-    settings = pf.Settings(discr_order=1, pressure_discr_order=1, pde='LinearElasticity', nl_solver_rhs_steps=1, tend=10, time_steps=1000)
-    settings.set_pde(pf.PDEs.LinearElasticity)  # Linear Elasticity problem
-    settings.set_material_params("E", 210000)
-    settings.set_material_params("nu", 0.3)
-
-    # Define boundary conditions
-    problem = pf.Problem()
-
-    print("\n\n")
-
-    # Add boundary conditions
-    #problem.add_dirichlet_value(id=0, value=[0.0, 0.0, 0.0])  # Fix the center
-    #problem.add_neumann_value(id=1, value=force_on_some_border_cell)  # Apply inward force
-
-    problem.set_displacement(id=1, value=[0.0, 0.0, 0.0])
-    problem.add_neumann_value(id=2, value=force_on_some_border_cell)  # Apply inward force
-
-    # Assign problem and settings
-    settings.set_problem(problem)
-    solver.set_settings(settings)
-
-    # Solve the problem
-    print("\n\n\nSolving the problem...")
-    solver.solve()
-    print("\n\nProblem solved.")
-
-    EXPORT = False
-    if EXPORT:
-        # Export results to visualize (VTU file)
-        filename = "./Bunny/deformed_bunny_" + str(border_cell_index) + "_" + str(force_norm) + ".vtu" 
-        solver.export_vtu(filename)
-        print(f"\n\nSolution exported to '{filename}' .")
-
-    displaced_points, new_connectivity = get_deformed_mesh(solver, shape_info.points)
-    print("Deformed mesh vertices retrieved successfully.")
-
-    return displaced_points, new_connectivity, some_border_cell_position, force_on_some_border_cell
-
-
-def setup_and_solve_fenics(shape_info, border_cell_index, total_time=1.0, dt=0.01, force_norm=1, phi=0, theta=0):
-    """
-    Sets up and solves the FEniCS Linear Elasticity problem for a given mesh 
+    Sets up and solves the Linear Elasticity problem using DOLFINx
     with forces applied to a specified border cell.
 
     Args:
-        shape_info (ShapeInfo): Contains all mesh-related data.
-        border_cell_index (int): Index of the border cell to apply the force.
-        total_time (float): Total simulation time (unused here, placeholder for time-dependency).
-        dt (float): Time step size (unused here, placeholder for time-dependency).
-        force_norm (float): Magnitude of the force to apply.
-        phi (float): Rotation angle around Z-axis.
-        theta (float): Elevation angle from Z-axis.
+        shape_info (ShapeInfo): Contains mesh-related data (points, cells, normals, etc.).
+        border_cell_index (int): Index of the border cell where the force is applied.
+        force_norm (float): Magnitude of the force.
 
     Returns:
-        tuple: Deformed mesh points, new connectivity, deformation point, applied force vector.
+        displaced_points (ndarray): Displaced mesh coordinates.
+        connectivity (ndarray): Mesh connectivity.
     """
 
-    # Extract the border cell data
-    some_border_cell_id = int(shape_info.surface_cells[border_cell_index])
-    some_border_cell_position = shape_info.surface_cells_center[border_cell_index]
-    some_border_cell_normal = shape_info.normals_surface[border_cell_index]
+    # --- 1. Create the Mesh ---
+    print("Creating mesh from ShapeInfo data...")
+    domain = mesh.create_mesh(
+        MPI.COMM_WORLD,
+        np.array(shape_info.connectivity, dtype=np.int32),
+        np.array(shape_info.points, dtype=np.float64),
+        ufl_domain="tetrahedron",
+    )
 
-    # Compute the force to apply
-    INWARD_FORCE_MULTIPLIER = -1
-    force_on_some_border_cell = INWARD_FORCE_MULTIPLIER * force_norm * some_border_cell_normal
-    force_on_some_border_cell = rotate_vector_phi_theta(force_on_some_border_cell, phi, theta)
-    force_on_some_border_cell = list(force_on_some_border_cell)
+    # --- 2. Function Space ---
+    V = fem.VectorFunctionSpace(domain, ("Lagrange", 1))
 
-    print(f"\n--- Applying Force on Border Cell {border_cell_index} ---")
-    print(f"Position: {some_border_cell_position}")
-    print(f"Normal: {some_border_cell_normal}")
-    print(f"Force Vector: {force_on_some_border_cell}")
+    # --- 3. Boundary Conditions ---
+    mesh_center = np.mean(shape_info.points, axis=0)
 
-    # Compute the mesh center
-    mesh_center = compute_mesh_center(shape_info.points, shape_info.connectivity)
-
-    # Find closest vertices for fixing displacement and applying force
-    kdtree = KDTree(shape_info.points)
-    fixed_vertex_id = kdtree.query(mesh_center)[1]
-    force_vertex_id = kdtree.query(some_border_cell_position)[1]
-
-    # Convert mesh to FEniCS format
-    mesh = Mesh()
-    editor = MeshEditor()
-    editor.open(mesh, "tetrahedron", 3, 3)
-    editor.init_vertices(len(shape_info.points))
-    editor.init_cells(len(shape_info.connectivity))
-
-    for i, point in enumerate(shape_info.points):
-        editor.add_vertex(i, point)
-
-    for i, cell in enumerate(shape_info.connectivity):
-        editor.add_cell(i, cell)
-
-    editor.close()
-    print("Mesh successfully loaded into FEniCS.")
-
-    # Define function space
-    V = VectorFunctionSpace(mesh, "Lagrange", 1)
-
-    # Define boundary conditions
-    def fixed_boundary(x, on_boundary):
+    def fixed_boundary(x):
         return np.linalg.norm(x - mesh_center) < 1e-2
 
-    bc = DirichletBC(V, Constant((0.0, 0.0, 0.0)), fixed_boundary)
+    u_bc = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+    bcs = [fem.dirichletbc(fem.Constant(domain, PETSc.ScalarType(u_bc)), fem.locate_dofs_geometrical(V, fixed_boundary), V)]
 
-    # External force applied at a specific point
-    ds = Measure("ds", domain=mesh)
-    force = Constant(tuple(force_on_some_border_cell))
+    # --- 4. Apply Force at Border Cell ---
+    border_cell_position = shape_info.surface_cells_center[border_cell_index]
+    border_cell_normal = shape_info.normals_surface[border_cell_index]
+    force_vector = force_norm * np.array(border_cell_normal, dtype=np.float64)
 
-    # Material parameters
-    E, nu = 210000, 0.3
+    print(f"\n--- Applying Force at Border Cell {border_cell_index} ---")
+    print(f"Position: {border_cell_position}, Normal: {border_cell_normal}, Force: {force_vector}")
+
+    f = fem.Constant(domain, PETSc.ScalarType(force_vector))
+    facet_marker = Measure("ds", domain=domain)
+
+    # --- 5. Material Parameters ---
+    E, nu = 1e4, 0.3
     mu = E / (2 * (1 + nu))
     lmbda = E * nu / ((1 + nu) * (1 - 2 * nu))
 
-    # Define stress and strain
     def epsilon(u):
         return sym(grad(u))
 
     def sigma(u):
-        return 2 * mu * epsilon(u) + lmbda * tr(epsilon(u)) * Identity(3)
+        return 2.0 * mu * epsilon(u) + lmbda * ufl.tr(epsilon(u)) * Identity(len(u))
 
-    # Define variational problem
+    # --- 6. Variational Problem ---
     u = TrialFunction(V)
     v = TestFunction(V)
-    f = conditional(near(mesh.coordinates()[force_vertex_id], some_border_cell_position, 1e-2), force, Constant((0.0, 0.0, 0.0)))
+
+    # Weak form of the linear elasticity problem
     a = inner(sigma(u), epsilon(v)) * dx
-    L = dot(f, v) * ds
+    L = inner(f, v) * facet_marker
 
-    # Solve the problem
-    u_sol = Function(V)
-    solve(a == L, u_sol, bc)
+    # --- 7. Solve the Problem ---
+    print("Solving linear elasticity problem...")
+    u_sol = fem.Function(V)
+    problem = fem.petsc.LinearProblem(a, L, bcs=bcs)
+    u_sol = problem.solve()
 
-    # Compute the deformed mesh
-    displaced_points = mesh.coordinates() + u_sol.compute_vertex_values().reshape(-1, 3)
-    print("Deformation computed successfully.")
+    # --- 8. Compute Displaced Points ---
+    displaced_points = domain.geometry.x + u_sol.x.array.reshape(-1, 3)
+    print("Deformation successfully computed.")
 
-    return displaced_points, shape_info.connectivity, some_border_cell_position, force_on_some_border_cell
+    return displaced_points, shape_info.connectivity
+
 
 def show_mesh(points, edges):
     # Start Polyscope
@@ -693,7 +556,6 @@ def show_mesh(points, edges):
     ps_axis_z.add_vector_quantity("Z-axis Vector", z_axis, enabled=True, color=(0, 0, 1))  # Blue
     # Show the mesh in the viewer
     ps.show()
-
 
 
 def show_two_meshes(points_1, connectivity_1, points_2, connectivity_2, deformation_point, force_vector):
@@ -776,31 +638,23 @@ def main():
     print(f"\nPoints = \n{points}\n")
     print(f"\nConnectivity = \n{connectivity}\n")
 
-
-    # This is to calcualate sdf and sdf gradient. 
-    # Sfgt gradient = normal 
+    # This is to calcualate sdf and sdf gradient.
+    # Sfgt gradient = normal
     obj_surface_points, obj_surface_faces = extract_surface_mesh(points, connectivity)
     print(f"\nobj_surface_faces = \n{obj_surface_faces}")
     print(f"\nobj_surface_points = \n{obj_surface_points}\n")
 
     # Here we won't really use surface_face. Surface cells is just obtained so we can apply force on them.
-    surface_face, surface_cells = find_surface_cells(points, connectivity) 
+    surface_face, surface_cells = find_surface_cells(points, connectivity)
 
-
-
-    
     surface_cells_center = compute_cells_center(points, connectivity, surface_cells)
     sdfs_surface, normals_surface = compute_sdf_and_normals(obj_surface_points, obj_surface_faces, surface_cells_center)
     print("\n\n\n_______COMPUTED SDF_______________\n")
 
-
-    
     # See 12 lines above : find_surface_cells
     print(f"The number of surface cells is: \n{len(surface_cells)}\n")
     print(f"surface_cells = \n{surface_cells}\n")
     print("\n_______COMPUTED SURFACE CELLS_______________\n")
-
-
 
     # Create ShapeInfo instance
     shape_info = ShapeInfo(points, connectivity, surface_cells, surface_cells_center, sdfs_surface, normals_surface)
@@ -808,9 +662,10 @@ def main():
     # Call the solver setup function
     index = [10, 100]
     for i in index:
-        deformed_points, deformed_connectivity, deformation_point, force = setup_and_solve_polyfem(shape_info, border_cell_index=int(i), force_norm=100)
+        deformed_points, deformed_connectivity, deformation_point, force = setup_and_solve_dolphinx(
+            shape_info, border_cell_index=int(i), force_norm=100
+        )
         time.sleep(10)  # Pause for 10 seconds
-
 
     # Print all deformed vertices
     print("\n--- Deformed Vertices ---\n")
@@ -822,14 +677,14 @@ def main():
     print(f"Shape: {deformed_connectivity.shape}")
     print(deformed_connectivity)
 
-     # Print the point of pressure
-    print("\ndeformation point:",deformation_point)
-    print("Force:",force,"\n\n")
+    # Print the point of pressure
+    print("\ndeformation point:", deformation_point)
+    print("Force:", force, "\n\n")
 
+    # show_mesh(deformed_points, deformed_connectivity)
 
-    #show_mesh(deformed_points, deformed_connectivity)
+    # show_two_meshes(points, connectivity, deformed_points, deformed_connectivity, deformation_point, force)
 
-    #show_two_meshes(points, connectivity, deformed_points, deformed_connectivity, deformation_point, force)
 
 if __name__ == "__main__":
     main()
