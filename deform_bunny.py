@@ -66,6 +66,29 @@ def compute_cell_center(points, connectivity, cell_id):
     center = np.mean(cell_vertices, axis=0)
     return center
 
+def compute_cells_center(points, connectivity, cell_ids):
+    """
+    Computes the centers of multiple tetrahedral cells.
+
+    Args:
+        points (numpy.ndarray): Nx3 array of vertex positions.
+        connectivity (numpy.ndarray): Mx4 array of tetrahedral cell indices.
+        cell_ids (list or numpy.ndarray): List of indices of tetrahedral cells.
+
+    Returns:
+        numpy.ndarray: Qx3 array of cell centers, where Q is the number of cells.
+    """
+    # Extract vertex indices for all specified cells
+    vertex_indices = connectivity[cell_ids]
+
+    # Retrieve positions of vertices for all cells
+    cell_vertices = points[vertex_indices]  # Shape: (Q, 4, 3)
+
+    # Compute the centers as the mean of the vertices along axis 1
+    centers = np.mean(cell_vertices, axis=1)  # Shape: (Q, 3)
+
+    return centers
+
 def compute_location(points, connectivity, cell_id, barycentric_coords):
     """
     Computes the Cartesian coordinates of a point given its barycentric coordinates 
@@ -204,7 +227,57 @@ def find_surface_cells(points, connectivity):
     return surface_faces, surface_cells
 
 
+def compute_mesh_center(points, connectivity):
+    """
+    Computes the geometric center of a tetrahedral mesh.
+
+    Args:
+        points (numpy.ndarray): Nx3 array of vertex positions.
+        connectivity (numpy.ndarray): Mx4 array of tetrahedral cell indices.
+
+    Returns:
+        numpy.ndarray: 1x3 array representing the coordinates of the mesh center.
+    """
+    # Retrieve all vertices for all tetrahedral cells
+    all_cell_vertices = points[connectivity]  # Shape: (M, 4, 3)
+
+    # Compute the center of each tetrahedral cell
+    cell_centers = np.mean(all_cell_vertices, axis=1)  # Shape: (M, 3)
+
+    # Compute the overall mesh center as the mean of all cell centers
+    mesh_center = np.mean(cell_centers, axis=0)  # Shape: (3,)
+
+    return mesh_center
+
+def find_closest_cell(points, connectivity, target_point):
+    """
+    Finds the tetrahedral cell whose center is closest to a given point.
+
+    Args:
+        points (numpy.ndarray): Nx3 array of vertex positions.
+        connectivity (numpy.ndarray): Mx4 array of tetrahedral cell indices.
+        target_point (numpy.ndarray): 1x3 array representing the target point.
+
+    Returns:
+        int: Index of the closest tetrahedral cell in the connectivity array.
+    """
+    # Retrieve all vertices for all tetrahedral cells
+    all_cell_vertices = points[connectivity]  # Shape: (M, 4, 3)
+
+    # Compute the center of each tetrahedral cell
+    cell_centers = np.mean(all_cell_vertices, axis=1)  # Shape: (M, 3)
+
+    # Compute the Euclidean distance between each cell center and the target point
+    distances = np.linalg.norm(cell_centers - target_point, axis=1)
+
+    # Find the index of the cell with the minimum distance
+    closest_cell_id = np.argmin(distances)
+
+    return closest_cell_id
+
+
 def main():
+    print("\n\n---------------------Start of Program-----------------\n")
 
     os.chdir(sys.path[0])
 
@@ -212,15 +285,25 @@ def main():
     mesh_path = "Bunny/bunny.mesh"  # Replace with actual input mesh path
     points, connectivity = get_tetra_mesh_data(mesh_path)
 
-    surface_face, surface_cells = find_surface_cells(points, connectivity)
-
-    print(f"The surface cells are: \n{surface_cells}\n")
-
     print(f"\nPoints.shape() = {np.shape(points)}")
     print(f"Connectivity.shape() = {np.shape(connectivity)}\n")
 
     print(f"\nPoints = \n{points}\n")
     print(f"\nConnectivity = \n{connectivity}\n")
+
+
+    surface_face, surface_cells = find_surface_cells(points, connectivity)
+    surface_cells_center = compute_cells_center(points,connectivity,surface_cells)
+    sdfs_surface, normals_surface = compute_sdf_and_normals(points, connectivity, surface_cells_center)
+    print(f"The number of surface cells is: \n{len(surface_cells)}\n")
+
+    mesh_center = compute_mesh_center(points, connectivity)
+    mesh_center_cell_id = find_closest_cell(points, connectivity, mesh_center)
+    print(f"mesh_center_cell_id = {mesh_center_cell_id}")
+
+    
+
+
 
     center = compute_cell_center(points, connectivity, 100)
     print(f"Center = {center}\n")
@@ -240,8 +323,28 @@ def main():
 
     # Define boundary conditions
     problem = pf.Problem()
-    problem.add_dirichlet_value(id=1, value=[0.0, 0.0, 0.0])  # Fix one end
-    problem.add_neumann_value(id=2455, value=[0.0, -0.1, 0.0])  # Apply downward force
+    problem.add_dirichlet_value(id= mesh_center_cell_id, value=[0.0, 0.0, 0.0])  # Fix the center
+
+    SOME_BORDER_CELL_INDEX_IN_ARRAY = 0
+    some_border_cell_id = surface_cells[SOME_BORDER_CELL_INDEX_IN_ARRAY]
+    some_border_cell_position = surface_cells_center[SOME_BORDER_CELL_INDEX_IN_ARRAY]
+    some_border_cell_sdf = sdfs_surface[SOME_BORDER_CELL_INDEX_IN_ARRAY]
+    some_border_cell_normal = normals_surface[SOME_BORDER_CELL_INDEX_IN_ARRAY]
+
+
+
+
+    INWARD_FORCE_MULTIPLIER = -1
+    FORCE_NORM = 0.5
+    force_on_some_border_cell = INWARD_FORCE_MULTIPLIER * FORCE_NORM * some_border_cell_normal
+    print(f"\nsome_border_cell_id = {some_border_cell_id}, "
+      f"some_border_cell_position = {some_border_cell_position}, "
+      f"some_border_cell_sdf = {some_border_cell_sdf:.4f}, "
+      f"some_border_cell_normal = {some_border_cell_normal}, "
+      f"force_on_some_border_cell = {force_on_some_border_cell}")
+
+
+    problem.add_neumann_value(id=some_border_cell_id, value=force_on_some_border_cell)  # Apply inward force on some border cell
 
     # Assign problem and settings
     settings.set_problem(problem)
