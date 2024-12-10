@@ -77,12 +77,33 @@ bc_rectangular_prism = DirichletBC(V, Constant((0.0, 0.0, 0.0)), rectangular_pri
 
 # Define force point and vector
 force_point = np.array([0.01413998, 0.5773221, 0.7305683])
-force_vector = [0.0, 1.0, 0.0]  # 10 Newtons in the Y direction
+force_vector = [3.7035865112060438, 1.1480558282122117, -0.9825552245653257]
 
 # Find the vertex at the force point
 kdtree = KDTree(points)
 force_vertex_id = kdtree.query(force_point)[1]
 force_vertex_coords = points[force_vertex_id]
+
+
+# Identify the tetrahedron that contains the force point
+def find_cell_containing_point(points, connectivity, point):
+    """
+    Find the tetrahedron that contains the given point.
+    """
+    for i, cell in enumerate(connectivity):
+        # Get the vertices of the tetrahedron (cell)
+        vertices = points[cell]
+        # Check if the point lies inside the tetrahedron using a basic approach (such as a volume-based check)
+        # For simplicity, we check if the point is close to any vertex (basic approach).
+        # A more advanced approach would be needed for precise checks (barycentric coordinates, etc.)
+        if np.linalg.norm(vertices[0] - point) < 0.01:  # This is a simplistic approach
+            return i  # Return the index of the cell
+    return None
+
+
+# Find the cell (tetrahedron) where the force is applied
+force_cell_index = find_cell_containing_point(points, connectivity, force_point)
+print(f"Force is applied to cell (tetrahedron) index: {force_cell_index}")
 
 # Material properties (jelly-like material)
 E = 5000  # Young's modulus (Pa)
@@ -116,23 +137,23 @@ v = TestFunction(V)
 a_form = (rho / dt**2) * inner(u, v) * dx + inner(sigma(u), epsilon(v)) * dx
 L_form = (rho / dt**2) * inner(u_n + dt * v_n + 0.5 * dt**2 * a_n, v) * dx
 
-# Apply point force (this is the same as before)
+# Apply point force to the identified cell
 subspaces = [V.sub(i) for i in range(3)]
 sources = [PointSource(subspaces[i], Point(*force_vertex_coords), force_vector[i]) for i in range(3)]
 
 # Damping parameters
-damping_factor = 0.2  # You can adjust this for more or less damping
+damping_factor = 0  # You can adjust this for more or less damping
 
 # Time loop
 print("\nTime-stepping simulation:")
 while time < T:
     time += dt
-    print(f"Time step: {time:.2f}")
+    print(f"Time step: {time:.4f}")
 
     # Solve the system with the updated form that includes damping
     solve(a_form == L_form, u_new, bc_sphere)
 
-    # Apply point force
+    # Apply point force to the same cell
     for source in sources:
         source.apply(u_new.vector())
 

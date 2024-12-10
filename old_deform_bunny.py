@@ -691,7 +691,7 @@ def main():
 
     # Call the solver setup function
     deformed_points, deformed_connectivity, deformation_point, force = setup_and_solve_polyfem(
-        shape_info, border_cell_index=10, force_norm=100
+        shape_info, border_cell_index=10, force_norm=4
     )
 
     # Print all deformed vertices
