@@ -77,7 +77,7 @@ bc_rectangular_prism = DirichletBC(V, Constant((0.0, 0.0, 0.0)), rectangular_pri
 
 # Define force point and vector
 force_point = np.array([0.01413998, 0.5773221, 0.7305683])
-force_vector = [0.0, 1.0, 0.0]  # 10 Newtons in the Y direction
+force_vector = [3.7035865112060438, 1.1480558282122117, -0.9825552245653257]
 
 # Find the vertex at the force point
 kdtree = KDTree(points)
@@ -164,4 +164,3 @@ while time < T:
     print(f"  Maximum displacement magnitude: {max_displacement:.5f}")
 
 print("Simulation complete.")
-
