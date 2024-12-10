@@ -7,6 +7,8 @@ import os, sys
 import pyvista as pv
 import polyscope as ps
 from scipy.spatial import KDTree
+import time
+from dolfin import *
 
 
 np.set_printoptions(suppress=True, precision=8)
@@ -420,7 +422,7 @@ def debug_array_info(array, array_name):
 
     print("\n\n\n\n\n")
 
-def get_deformed_mesh(solver):
+def get_deformed_mesh(solver, points):
     """
     Retrieves the deformed mesh from the PolyFEM solver.
 
@@ -437,52 +439,13 @@ def get_deformed_mesh(solver):
     debug_array_info(displacement, "displacement")
 
 
+
+
+
     # Add displacement to original vertices to get the deformed mesh
     displaced_points = points + displacement
 
     return displaced_points, connectivity
-
-class MyMesh:
-    """
-    Custom mesh structure to store points and connectivity.
-    """
-    def __init__(self, points, connectivity):
-        self.points = points
-        self.connectivity = connectivity
-
-    def __repr__(self):
-        return f"MyMesh(points.shape={self.points.shape}, connectivity.shape={self.connectivity.shape})"
-
-def get_deformed_mesh_frames(solver):
-    """
-    Retrieves the deformed mesh for each time frame from the PolyFEM solver.
-
-    Args:
-        solver (pf.Solver): PolyFEM solver instance after solving.
-
-    Returns:
-        list[MyMesh]: List of MyMesh objects, each containing deformed vertex positions
-                      and the connectivity for each time frame.
-    """
-    # Retrieve all time frame solutions
-    solution_frames = solver.get_sampled_solution_frames()
-    my_mesh_frames = []
-
-    print(f"Number of time frames: {len(solution_frames)}")
-    for frame_idx, (points, connectivity, displacement) in enumerate(solution_frames):
-        print(f"Processing time frame {frame_idx + 1}...")
-
-        # Compute the deformed points for this frame
-        displaced_points = points + displacement
-        name = f"displacement, frame_idx: {frame_idx}"
-        debug_array_info(displacement, name)
-
-        # Create a MyMesh instance for this frame
-        my_mesh = MyMesh(points=displaced_points, connectivity=connectivity)
-        my_mesh_frames.append(my_mesh)
-
-    print("All time frames processed successfully.")
-    return my_mesh_frames
 
 def setup_and_solve_polyfem(shape_info, border_cell_index, total_time=1.0, dt=0.01, force_norm = 1, phi=0, theta =0):
     """
@@ -543,7 +506,7 @@ def setup_and_solve_polyfem(shape_info, border_cell_index, total_time=1.0, dt=0.
         return 0  # Default (no tag
 
     print("\n\n\n_______COMPUTED FORCES_______________\n\n")
-    center = compute_cell_center(shape_info.points, shape_info.connectivity, 100)
+    center = compute_cell_center(shape_info.points, shape_info.connectivity, mesh_center_cell_id)
     print("__ The center won't move __")
     print(f"mesh_center_cell_id = {mesh_center_cell_id}")
     print(f"Center = {center}")
@@ -558,11 +521,8 @@ def setup_and_solve_polyfem(shape_info, border_cell_index, total_time=1.0, dt=0.
     print("Mesh successfully loaded into PolyFEM.")
 
     # Set solver settings
-    time_steps = int(total_time/dt)
-    print(f"\nThe number of time steps: {time_steps}\n")
-    settings = pf.Settings(discr_order=1, pressure_discr_order=1, pde='LinearElasticity', nl_solver_rhs_steps=1, tend=total_time, time_steps=time_steps)
+    settings = pf.Settings(discr_order=1, pressure_discr_order=1, pde='LinearElasticity', nl_solver_rhs_steps=1, tend=10, time_steps=1000)
     settings.set_pde(pf.PDEs.LinearElasticity)  # Linear Elasticity problem
-    settings.time_dependent = True
     settings.set_material_params("E", 210000)
     settings.set_material_params("nu", 0.3)
 
@@ -594,22 +554,111 @@ def setup_and_solve_polyfem(shape_info, border_cell_index, total_time=1.0, dt=0.
         solver.export_vtu(filename)
         print(f"\n\nSolution exported to '{filename}' .")
 
-    displaced_points, new_connectivity = get_deformed_mesh(solver)
-
-    TEST_TIME = False
-    if TEST_TIME:
-        mesh_array = get_deformed_mesh_frames(solver)
-
-        print("\n\n\n\n")
-        print("The mesh array has:",len(mesh_array),"elements")
-
-        displaced_points = mesh_array[0].points
-        new_connectivity = mesh_array[0].connectivity
-
-
+    displaced_points, new_connectivity = get_deformed_mesh(solver, shape_info.points)
     print("Deformed mesh vertices retrieved successfully.")
 
     return displaced_points, new_connectivity, some_border_cell_position, force_on_some_border_cell
+
+
+def setup_and_solve_fenics(shape_info, border_cell_index, total_time=1.0, dt=0.01, force_norm=1, phi=0, theta=0):
+    """
+    Sets up and solves the FEniCS Linear Elasticity problem for a given mesh 
+    with forces applied to a specified border cell.
+
+    Args:
+        shape_info (ShapeInfo): Contains all mesh-related data.
+        border_cell_index (int): Index of the border cell to apply the force.
+        total_time (float): Total simulation time (unused here, placeholder for time-dependency).
+        dt (float): Time step size (unused here, placeholder for time-dependency).
+        force_norm (float): Magnitude of the force to apply.
+        phi (float): Rotation angle around Z-axis.
+        theta (float): Elevation angle from Z-axis.
+
+    Returns:
+        tuple: Deformed mesh points, new connectivity, deformation point, applied force vector.
+    """
+
+    # Extract the border cell data
+    some_border_cell_id = int(shape_info.surface_cells[border_cell_index])
+    some_border_cell_position = shape_info.surface_cells_center[border_cell_index]
+    some_border_cell_normal = shape_info.normals_surface[border_cell_index]
+
+    # Compute the force to apply
+    INWARD_FORCE_MULTIPLIER = -1
+    force_on_some_border_cell = INWARD_FORCE_MULTIPLIER * force_norm * some_border_cell_normal
+    force_on_some_border_cell = rotate_vector_phi_theta(force_on_some_border_cell, phi, theta)
+    force_on_some_border_cell = list(force_on_some_border_cell)
+
+    print(f"\n--- Applying Force on Border Cell {border_cell_index} ---")
+    print(f"Position: {some_border_cell_position}")
+    print(f"Normal: {some_border_cell_normal}")
+    print(f"Force Vector: {force_on_some_border_cell}")
+
+    # Compute the mesh center
+    mesh_center = compute_mesh_center(shape_info.points, shape_info.connectivity)
+
+    # Find closest vertices for fixing displacement and applying force
+    kdtree = KDTree(shape_info.points)
+    fixed_vertex_id = kdtree.query(mesh_center)[1]
+    force_vertex_id = kdtree.query(some_border_cell_position)[1]
+
+    # Convert mesh to FEniCS format
+    mesh = Mesh()
+    editor = MeshEditor()
+    editor.open(mesh, "tetrahedron", 3, 3)
+    editor.init_vertices(len(shape_info.points))
+    editor.init_cells(len(shape_info.connectivity))
+
+    for i, point in enumerate(shape_info.points):
+        editor.add_vertex(i, point)
+
+    for i, cell in enumerate(shape_info.connectivity):
+        editor.add_cell(i, cell)
+
+    editor.close()
+    print("Mesh successfully loaded into FEniCS.")
+
+    # Define function space
+    V = VectorFunctionSpace(mesh, "Lagrange", 1)
+
+    # Define boundary conditions
+    def fixed_boundary(x, on_boundary):
+        return np.linalg.norm(x - mesh_center) < 1e-2
+
+    bc = DirichletBC(V, Constant((0.0, 0.0, 0.0)), fixed_boundary)
+
+    # External force applied at a specific point
+    ds = Measure("ds", domain=mesh)
+    force = Constant(tuple(force_on_some_border_cell))
+
+    # Material parameters
+    E, nu = 210000, 0.3
+    mu = E / (2 * (1 + nu))
+    lmbda = E * nu / ((1 + nu) * (1 - 2 * nu))
+
+    # Define stress and strain
+    def epsilon(u):
+        return sym(grad(u))
+
+    def sigma(u):
+        return 2 * mu * epsilon(u) + lmbda * tr(epsilon(u)) * Identity(3)
+
+    # Define variational problem
+    u = TrialFunction(V)
+    v = TestFunction(V)
+    f = conditional(near(mesh.coordinates()[force_vertex_id], some_border_cell_position, 1e-2), force, Constant((0.0, 0.0, 0.0)))
+    a = inner(sigma(u), epsilon(v)) * dx
+    L = dot(f, v) * ds
+
+    # Solve the problem
+    u_sol = Function(V)
+    solve(a == L, u_sol, bc)
+
+    # Compute the deformed mesh
+    displaced_points = mesh.coordinates() + u_sol.compute_vertex_values().reshape(-1, 3)
+    print("Deformation computed successfully.")
+
+    return displaced_points, shape_info.connectivity, some_border_cell_position, force_on_some_border_cell
 
 def show_mesh(points, edges):
     # Start Polyscope
@@ -757,7 +806,10 @@ def main():
     shape_info = ShapeInfo(points, connectivity, surface_cells, surface_cells_center, sdfs_surface, normals_surface)
 
     # Call the solver setup function
-    deformed_points, deformed_connectivity, deformation_point, force = setup_and_solve_polyfem(shape_info, border_cell_index=10, force_norm=100, total_time= 1.0, dt= 0.01)
+    index = [10, 100]
+    for i in index:
+        deformed_points, deformed_connectivity, deformation_point, force = setup_and_solve_polyfem(shape_info, border_cell_index=int(i), force_norm=100)
+        time.sleep(10)  # Pause for 10 seconds
 
 
     # Print all deformed vertices
@@ -777,7 +829,7 @@ def main():
 
     #show_mesh(deformed_points, deformed_connectivity)
 
-    show_two_meshes(points, connectivity, deformed_points, deformed_connectivity, deformation_point, force)
+    #show_two_meshes(points, connectivity, deformed_points, deformed_connectivity, deformation_point, force)
 
 if __name__ == "__main__":
     main()
