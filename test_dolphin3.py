@@ -52,8 +52,7 @@ print("Mesh successfully converted to FEniCS format.")
 # Function space
 V = VectorFunctionSpace(mesh, "Lagrange", 1)
 
-
-# Define boundary condition (fixed displacement at boundaries)
+# Boundary condition (fixed displacement at boundaries)
 def boundary(x, on_boundary):
     return on_boundary
 
@@ -62,20 +61,22 @@ bc = DirichletBC(V, Constant((0.0, 0.0, 0.0)), boundary)
 
 # Define force location (nearest vertex to the given deformation point)
 force_point = np.array([0.01413998, 0.5773221, 0.7305683])  # Given deformation point
-force_vector = [93.77047826000594, 28.889294419396272, -19.30041644211834]
+force_vector = [937770.0, 288890.0, -193000.0]  # Increased force
 
 kdtree = KDTree(points)
 force_vertex_id = kdtree.query(force_point)[1]
 force_vertex_coords = points[force_vertex_id]
 print(f"Applying force at vertex {force_vertex_id}, location: {force_vertex_coords}")
 
-# Variational problem: Linear elasticity
-E = 2100  # Young's modulus
-nu = 0.3  # Poisson's ratio
+# Material properties (lowered Young's modulus for more deformation)
+E = 1000       # Reduced Young's modulus for a more deformable material
+nu = 0.3       # Poisson's ratio
+rho = 1000     # Density of the material
+
 mu = E / (2 * (1 + nu))
 lmbda = E * nu / ((1 + nu) * (1 - 2 * nu))
 
-
+# Define stress and strain
 def epsilon(u):
     return sym(grad(u))
 
@@ -84,31 +85,50 @@ def sigma(u):
     return lmbda * div(u) * Identity(3) + 2 * mu * epsilon(u)
 
 
-# Define trial and test functions
+# Time-stepping parameters
+dt = 0.01       # Time step size
+T = 1.0         # Total simulation time
+time = 0.0      # Start time
+
+# Define trial, test, and previous solution
 u = TrialFunction(V)
 v = TestFunction(V)
+u_n = Function(V)  # Displacement at previous time step
+u_new = Function(V)  # Displacement at current time step
 
-# Define bilinear and linear forms
-a = inner(sigma(u), epsilon(v)) * dx  # Bilinear form (stiffness matrix)
-L = dot(Constant((0.0, 0.0, 0.0)), v) * dx  # No distributed body forces
+# External point force (applied at the vertex)
+subspaces = [V.sub(i) for i in range(3)]
+sources = [
+    PointSource(subspaces[i], Point(*force_vertex_coords), force_vector[i])
+    for i in range(3)
+]
 
-# Solve the system
-u_sol = Function(V)
-solve(a == L, u_sol, bc)
+# Variational form for dynamic elasticity (Newmark-beta method)
+a = rho / dt**2 * inner(u, v) * dx + inner(sigma(u), epsilon(v)) * dx
+L = rho / dt**2 * inner(u_n, v) * dx
 
-# Apply point force component-by-component
-subspaces = [V.sub(i) for i in range(3)]  # Access the scalar subspaces of V
-sources = [PointSource(subspaces[i], Point(*force_vertex_coords), force_vector[i]) for i in range(3)]
+# Output file
+file = XDMFFile("bunny_dynamic_deformation.xdmf")
+file.parameters["flush_output"] = True
+file.parameters["functions_share_mesh"] = True
 
-# Apply the point sources
-for source in sources:
-    source.apply(u_sol.vector())
+# Time-stepping loop
+while time < T:
+    time += dt
+    print(f"Time step: {time:.2f}")
 
-# Save results
-file = XDMFFile("bunny_deformation.xdmf")
-file.write(u_sol)
-print("Results saved to bunny_deformation.xdmf.")
+    # Solve system
+    solve(a == L, u_new, bc)
 
-# Output displacement at force point
-displacement = u_sol(force_vertex_coords)
-print(f"Displacement at force point {force_vertex_coords}: {displacement}")
+    # Apply the point force
+    for source in sources:
+        source.apply(u_new.vector())
+
+    # Save results
+    file.write(u_new, time)
+
+    # Update for next time step
+    u_n.assign(u_new)
+
+print("Simulation complete. Results saved to bunny_dynamic_deformation.xdmf.")
+
