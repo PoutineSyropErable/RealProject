@@ -225,7 +225,6 @@ def main():
     center = compute_cell_center(points, connectivity, 100)
     print(f"Center = {center}\n")
 
-
     # Initialize the PolyFEM solver
     solver = pf.Solver()
 
@@ -242,7 +241,7 @@ def main():
     # Define boundary conditions
     problem = pf.Problem()
     problem.add_dirichlet_value(id=1, value=[0.0, 0.0, 0.0])  # Fix one end
-    problem.add_neumann_value(id=100, value=[0.0, -1.0, 0.0])   # Apply downward force
+    problem.add_neumann_value(id=2455, value=[0.0, -0.1, 0.0])  # Apply downward force
 
     # Assign problem and settings
     settings.set_problem(problem)
@@ -254,8 +253,8 @@ def main():
     print("Problem solved.")
 
     # Export results to visualize (VTU file)
-    solver.export_vtu("./Bunny/modified_bunny.vtu")
-    print("Solution exported to 'Bunny/modified_bunny.vtu'.")
+    # solver.export_vtu("./Bunny/modified_bunny.vtu")
+    # print("Solution exported to 'Bunny/modified_bunny.vtu'.")
 
 
 if __name__ == "__main__":
