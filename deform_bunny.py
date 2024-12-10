@@ -6,6 +6,8 @@ import numpy as np
 import os, sys
 import pyvista as pv
 
+np.set_printoptions(suppress=True, precision=8)
+
 # master_venv on windows
 # conda_venv on linux
 
@@ -77,16 +79,45 @@ def compute_sdf_and_normals(points, faces, query_points):
     """
     Computes the signed distance field (SDF) and surface normals at query points.
     Args:
-        points (numpy.ndarray): Nx3 array of vertex positions.
-        faces (numpy.ndarray): Mx3 array of surface triangle indices.
+        points (numpy.ndarray): Nx3 array of vertex positions (float).
+        faces (numpy.ndarray): Mx3 array of surface triangle indices (int).
         query_points (numpy.ndarray): Qx3 array of points where SDF and normals are computed.
     Returns:
         tuple: SDF values and normals at query points.
     """
-    # Compute SDF and normals using libigl
-    sdf, _, normals = igl.signed_distance(query_points, points, faces, return_normals=True)
+    # Ensure data types are correct
+    points = points.astype(np.float64)       # Vertex positions
+    faces = faces.astype(np.int32)           # Triangle indices
+    query_points = query_points.astype(np.float64)  # Query points
 
-    # Normalize normals
+    # Print the input arrays for debugging
+    print("\n--- Input Data for Signed Distance Calculation ---\n")
+    print(f"Query Points Shape: {query_points.shape}")
+    print(f"Query Points:\n{query_points}")
+
+    print(f"\nSurface Vertices Shape: {points.shape}")
+    print(f"Surface Vertices:\n{points}")
+
+    print(f"\nSurface Faces Shape: {faces.shape}")
+    print(f"Surface Faces:\n{faces}")
+
+    # Compute SDF and normals using libigl
+    output = igl.signed_distance(query_points, points, faces, return_normals=True)
+    # Extract the results
+    sdf = output[0]  # Signed distances
+    indices = output[1]  # Indices of closest faces
+    closest_points = output[2]  # Closest points on the mesh
+    normals = output[3]  # 
+
+    # Print the results in a formatted way
+    print("\n--- Signed Distance Output ---\n")
+    print(f"Signed Distances (SDF):\n{np.array2string(sdf, precision=4, separator=', ', threshold=10)}\n")
+    print(f"Closest Face Indices:\n{np.array2string(indices, separator=', ', threshold=10)}\n")
+    print(f"Closest Points on Mesh:\n{np.array2string(closest_points, precision=4, separator=', ', threshold=10)}\n")
+    print(f"Normals :\n{np.array2string(normals, precision=4, separator=', ', threshold=10)}\n")
+
+
+    # Normalize normals to ensure unit vectors
     normals /= np.linalg.norm(normals, axis=1, keepdims=True)
 
     return sdf, normals
@@ -285,28 +316,63 @@ def main():
     print(f"\nConnectivity = \n{connectivity}\n")
 
 
-    surface_face, surface_cells = find_surface_cells(points, connectivity)
-    surface_cells_center = compute_cells_center(points,connectivity,surface_cells)
-    sdfs_surface, normals_surface = compute_sdf_and_normals(points, connectivity, surface_cells_center)
+    # This is to calcualate sdf and sdf gradient. 
+    # Sfgt gradient = normal 
+    obj_surface_points, obj_surface_faces = extract_surface_mesh(points, connectivity)
+    print(f"\nobj_surface_faces = \n{obj_surface_faces}")
+    print(f"\nobj_surface_points = \n{obj_surface_points}\n")
+
+    # Here we won't really use surface_face. Surface cells is just obtained so we can apply force on them.
+    surface_face, surface_cells = find_surface_cells(points, connectivity) 
+
+
+
+    
+    surface_cells_center = compute_cells_center(points, connectivity, surface_cells)
+    sdfs_surface, normals_surface = compute_sdf_and_normals(obj_surface_points, obj_surface_faces, surface_cells_center)
+    print("\n\n\n_______COMPUTED SDF_______________\n")
+
+
+    
+    # See 12 lines above : find_surface_cells
     print(f"The number of surface cells is: \n{len(surface_cells)}\n")
+    print(f"surface_cells = \n{surface_cells}\n")
+    print("\n_______COMPUTED SURFACE CELLS_______________\n")
 
-    mesh_center = compute_mesh_center(points, connectivity)
-    mesh_center_cell_id = find_closest_cell(points, connectivity, mesh_center)
-    print(f"mesh_center_cell_id = {mesh_center_cell_id}")
 
-    SOME_BORDER_CELL_INDEX_IN_ARRAY = 0
-    some_border_cell_id = surface_cells[SOME_BORDER_CELL_INDEX_IN_ARRAY]
+
+    SOME_BORDER_CELL_INDEX_IN_ARRAY = 100
+    some_border_cell_id = int(surface_cells[SOME_BORDER_CELL_INDEX_IN_ARRAY])
     some_border_cell_position = surface_cells_center[SOME_BORDER_CELL_INDEX_IN_ARRAY]
     some_border_cell_sdf = sdfs_surface[SOME_BORDER_CELL_INDEX_IN_ARRAY]
     some_border_cell_normal = normals_surface[SOME_BORDER_CELL_INDEX_IN_ARRAY]
+
+    INWARD_FORCE_MULTIPLIER = -1
+    FORCE_NORM = 0.5
+    force_on_some_border_cell = list(INWARD_FORCE_MULTIPLIER * FORCE_NORM * some_border_cell_normal)
+    print(f"\nTaking the {SOME_BORDER_CELL_INDEX_IN_ARRAY}th Border Cell")
+    print(f"some_border_cell_id = {some_border_cell_id}")
+    print(f"some_border_cell_position = {some_border_cell_position}")
+    print(f"some_border_cell_sdf = {some_border_cell_sdf:.4f}")
+    print(f"some_border_cell_normal = {some_border_cell_normal}")
+    print(f"force_on_some_border_cell = {force_on_some_border_cell}")
+
+    mesh_center = compute_mesh_center(points, connectivity)
+    mesh_center_cell_id = find_closest_cell(points, connectivity, mesh_center)
+    
+
+    print("\n\n\n_______COMPUTED FORCES_______________\n\n")
 
     
 
 
 
     center = compute_cell_center(points, connectivity, 100)
-    print(f"Center = {center}\n")
+    print("__ The center won't move __")
+    print(f"mesh_center_cell_id = {mesh_center_cell_id}")
+    print(f"Center = {center}")
 
+    print("\n\n\n_______START OF SOLVER_______________\n\n")
     # Initialize the PolyFEM solver
     solver = pf.Solver()
 
@@ -320,25 +386,14 @@ def main():
     settings.set_material_params("E", 200.0)  # Young's modulus
     settings.set_material_params("nu", 0.3)  # Poisson's ratio
 
-    # Define boundary conditions
+   # Define boundary conditions
     problem = pf.Problem()
-    problem.add_dirichlet_value(id= mesh_center_cell_id, value=[0.0, 0.0, 0.0])  # Fix the center
 
+    print("\n\n")
 
+    
 
-
-
-
-    INWARD_FORCE_MULTIPLIER = -1
-    FORCE_NORM = 0.5
-    force_on_some_border_cell = INWARD_FORCE_MULTIPLIER * FORCE_NORM * some_border_cell_normal
-    print(f"\nsome_border_cell_id = {some_border_cell_id}, "
-      f"some_border_cell_position = {some_border_cell_position}, "
-      f"some_border_cell_sdf = {some_border_cell_sdf:.4f}, "
-      f"some_border_cell_normal = {some_border_cell_normal}, "
-      f"force_on_some_border_cell = {force_on_some_border_cell}")
-
-
+    problem.add_dirichlet_value(id=int(mesh_center_cell_id), value=[0.0, 0.0, 0.0])  # Fix the center
     problem.add_neumann_value(id=some_border_cell_id, value=force_on_some_border_cell)  # Apply inward force on some border cell
 
     # Assign problem and settings
@@ -346,9 +401,9 @@ def main():
     solver.set_settings(settings)
 
     # Solve the problem
-    print("Solving the problem...")
+    print("\n\n\nSolving the problem...")
     solver.solve()
-    print("Problem solved.")
+    print("\n\nProblem solved.")
 
     # Export results to visualize (VTU file)
     # solver.export_vtu("./Bunny/modified_bunny.vtu")
