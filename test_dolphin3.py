@@ -52,6 +52,8 @@ class SphereSubDomain(SubDomain):
         return distance_to_center < sphere_radius and on_boundary
 
 
+
+
 sphere_boundary = SphereSubDomain()
 
 # Create Dirichlet boundary condition for sphere boundary
@@ -86,7 +88,7 @@ force_vertex_coords = points[force_vertex_id]
 
 # Material properties (jelly-like material)
 E = 5000  # Young's modulus (Pa)
-nu = 0.49  # Poisson's ratio
+nu = 0.35  # Poisson's ratio
 rho = 1000  # Density (kg/m^3)
 
 mu = E / (2 * (1 + nu))
