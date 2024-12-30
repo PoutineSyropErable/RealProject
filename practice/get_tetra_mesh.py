@@ -89,8 +89,11 @@ tetra_mesh = mesh.create_mesh(MPI.COMM_WORLD, connectivity, points, coordinate_e
 
 
 # Output mesh information
-print(f"Mesh geometry:\n{tetra_mesh.geometry.x}")
-print(f"Mesh topology:\n{tetra_mesh.topology.cell_type}\n")
+print(f"Mesh topology cell types:\n{tetra_mesh.topology.cell_type}\n")
+""" See load_bunny for information and testing with getting a numpy array of points 
+Of points and connectivity from this, and outputing it with meshio to a file
+"""
+
 
 
 # Extract mesh data from DOLFINx for Pyvista
