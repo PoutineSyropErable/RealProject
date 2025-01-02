@@ -9,10 +9,10 @@ import numpy as np
 DEBUG_ = True
 
 # Material properties
-E = 10e6  # Young's modulus for rubber in Pascals (Pa)
-nu = 0.45  # Poisson's ratio for rubber
-rho = 10 # Some rubber that weighs as much as metal
-g = 10
+E = 10e4  # Young's modulus for rubber in Pascals (Pa)
+nu = 0.40  # Poisson's ratio for rubber
+rho = 1 # Some rubber that weighs as much as metal
+g = 10000 # Jupiter gravity lol
 
 # Lamé parameters
 mu = E / (2 * (1 + nu))
@@ -29,28 +29,33 @@ V = fem.functionspace(domain, ("Lagrange", 1, (domain.geometry.dim, )))
 
 
 
-ground_z = 0
+Z_GROUND = 0
 def grounded_bunny(x):
-    return np.isclose(x[2],ground_z) # no movement at z = 0, it's 2D
+    return x[2] <= Z_GROUND
+
+def info(x):
+    print(f"type(x) = {type(x)}\n")
+    print(f"np.shape(x) = {np.shape(x)}\n")
+    print(f"x = \n{x}\n")
+    print(f"x.shape[1] = {x.shape[1]}\n")
+    return np.ones(x.shape[1])
 
 
 
 tdim = domain.topology.dim # 3D
 fdim = tdim - 1 # 2D
 boundary_facets = mesh.locate_entities_boundary(domain, fdim , grounded_bunny)
+all_boundary_facets = mesh.locate_entities_boundary(domain, fdim , info)
 if DEBUG_:
-	print(f"type(boundary_facets) = {type(boundary_facets)}\n")
-	print(f"np.shape(boundary_facets) = {np.shape(boundary_facets)}\n")
-	print(f"boundary_facets = \n{boundary_facets}\n")
+	print(f"boundary_facets = \n{boundary_facets}, len(boundary_facets) = {len(boundary_facets)}")
+if DEBUG_:
+	print(f"all_boundary_facets = \n{all_boundary_facets}, len(all_boundary_facets) = {len(all_boundary_facets)}")
 
 
 u_D = np.array([0, 0, 0], dtype=default_scalar_type) # no displacement on boundary
 bc = fem.dirichletbc(u_D, fem.locate_dofs_topological(V, fdim, boundary_facets), V) # create a condition where u = 0 on z = 0
 
 
-def grounded_bunny_tolerance(x):
-    tolerance = 0.00005  # Define a small tolerance
-    return np.abs(x[2] - ground_z) < tolerance  # Check if z is within [-tolerance, tolerance], it's 3D
 
 
 def epsilon(u):
@@ -97,10 +102,10 @@ plane_resolution = 10  # Number of subdivisions along each axis
 x = np.linspace(-dmax, dmax, plane_resolution)
 y = np.linspace(-dmax, dmax, plane_resolution)
 x, y = np.meshgrid(x, y)
-z = np.ones_like(x)*ground_z  # z = 0 for the entire plan
+z = np.ones_like(x)*Z_GROUND  # z = 0 for the entire plan
 # Create the PyVista grid for the plane
 plane = pyvista.StructuredGrid(x, y, z)
-p.add_mesh(plane, color="lightgray", opacity=0.5, label=f"z = {ground_z} Plane")
+p.add_mesh(plane, color="lightgray", opacity=0.5, label=f"z = {Z_GROUND} Plane")
 
 
 
