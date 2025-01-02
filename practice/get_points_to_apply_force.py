@@ -370,11 +370,3 @@ volume = tetra_grid.volume
 print(f"Volume of tetrahedral mesh: {volume}")
 
 
-
-
-# Material properties for silicone rubber
-young_modulus = 1.0e6  # Young's modulus, E (in Pascals, N/m^2)
-poissons_ratio = 0.45  # Poisson's ratio, ν (dimensionless)
-density = 1200.0       # Density, ρ (in kg/m^3)
-
-

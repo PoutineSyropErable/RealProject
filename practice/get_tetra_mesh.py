@@ -7,6 +7,7 @@ from dolfinx import mesh
 import ufl
 import basix.ufl
 import pyvista as pv
+import polyscope as ps
 
 # Function to extract mesh points and connectivity
 def get_tetra_mesh_data(file_path):
@@ -37,8 +38,10 @@ print(f"y_min: {y_min}, y_max: {y_max}")
 print(f"z_min: {z_min}, z_max: {z_max}")
 
 # Calculate required shifts
+# dz = 0.0015
+dz = 0.006
 x_shift = -x_min
-z_shift = -z_min
+z_shift = -z_min - dz
 y_shift = -(y_min + y_max) / 2  # Center y around 0
 
 # Apply transformations
@@ -112,3 +115,71 @@ plotter.show()
 # Save the mesh to XDMF
 meshio.write_points_cells( "bunny.xdmf",    points, [("tetra", connectivity)] )
 print("Mesh saved to bunny.xdmf")
+
+
+
+
+
+#- Polyscope section:
+def show_mesh(points, edges):
+    # Start Polyscope
+    ps.init()
+
+    # Register the mesh with Polyscope
+    ps_mesh = ps.register_surface_mesh("Mesh Viewer", points, edges)
+
+    # Register the vector quantity on the mesh
+    ps_mesh.add_vector_quantity("Vectors to Center", points, defined_on="vertices")
+
+    # ------------------- Show the 3D Axis
+    origin = np.array([[0, 0.01, 0]])
+
+
+    # ------------------- Add a Plane at z = 0 -------------------
+    dy = y_max - y_min
+    dx = x_max - x_min
+    dmax = max(dy, dx)
+    print("dmax=",dmax)
+    # Define the plane's vertices (rectangle on z = 0)
+    plane_vertices = np.array([
+        [-1, -1, 0],  # Bottom-left
+        [1, -1, 0],   # Bottom-right
+        [1, 1, 0],    # Top-right
+        [-1, 1, 0],   # Top-left
+    ]) * dmax  # Scale the plane size as needed
+
+    # Define the plane's triangular faces
+    plane_faces = np.array([
+        [0, 1, 2],  # First triangle
+        [0, 2, 3],  # Second triangle
+    ])
+
+    # Register the plane
+    ps.register_surface_mesh("z = 0 Plane", plane_vertices, plane_faces, color=(0.8, 0.8, 0.8), transparency=0.5)
+
+    # ------------------- Show the 3D Axis -------------------
+    vector_length = 10
+    # Vector length is useless
+    x_axis = vector_length * np.array([[1, 0, 0]])  # Vector in +X direction
+    y_axis = vector_length * np.array([[0, 1, 0]])  # Vector in +Y direction
+    z_axis = vector_length * np.array([[0, 0, 1]])  # Vector in +Z direction
+
+    ps_axis_x = ps.register_point_cloud("X-axis Origin", origin, radius=0.01)
+    ps_axis_x.add_vector_quantity("X-axis Vector", x_axis, enabled=True, color=(1, 0, 0))  # Red
+
+    ps_axis_y = ps.register_point_cloud("Y-axis Origin", origin, radius=0.01)
+    ps_axis_y.add_vector_quantity("Y-axis Vector", y_axis, enabled=True, color=(0, 1, 0))  # Green
+
+    ps_axis_z = ps.register_point_cloud("Z-axis Origin", origin, radius=0.01)
+    ps_axis_z.add_vector_quantity("Z-axis Vector", z_axis, enabled=True, color=(0, 0, 1))  # Blue
+
+    
+
+
+
+    # Show the mesh in the viewer
+    ps.show()
+
+show_mesh(points, connectivity)
+
+

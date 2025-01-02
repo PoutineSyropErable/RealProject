@@ -6,12 +6,13 @@ from dolfinx.fem.petsc import LinearProblem
 from mpi4py import MPI
 import ufl
 import numpy as np
+DEBUG_ = True
 
 # Material properties
 E = 10e6  # Young's modulus for rubber in Pascals (Pa)
 nu = 0.45  # Poisson's ratio for rubber
-rho = 0.5
-g = 0.0000001
+rho = 10 # Some rubber that weighs as much as metal
+g = 10
 
 # Lamé parameters
 mu = E / (2 * (1 + nu))
@@ -28,17 +29,28 @@ V = fem.functionspace(domain, ("Lagrange", 1, (domain.geometry.dim, )))
 
 
 
+ground_z = 0
 def grounded_bunny(x):
-    return np.isclose(x[2],0) # no movement at z = 0
+    return np.isclose(x[2],ground_z) # no movement at z = 0, it's 2D
 
 
-fdim = domain.topology.dim - 1
-boundary_facets = mesh.locate_entities_boundary(domain, fdim, grounded_bunny)
+
+tdim = domain.topology.dim # 3D
+fdim = tdim - 1 # 2D
+boundary_facets = mesh.locate_entities_boundary(domain, fdim , grounded_bunny)
+if DEBUG_:
+	print(f"type(boundary_facets) = {type(boundary_facets)}\n")
+	print(f"np.shape(boundary_facets) = {np.shape(boundary_facets)}\n")
+	print(f"boundary_facets = \n{boundary_facets}\n")
+
 
 u_D = np.array([0, 0, 0], dtype=default_scalar_type) # no displacement on boundary
 bc = fem.dirichletbc(u_D, fem.locate_dofs_topological(V, fdim, boundary_facets), V) # create a condition where u = 0 on z = 0
 
 
+def grounded_bunny_tolerance(x):
+    tolerance = 0.00005  # Define a small tolerance
+    return np.abs(x[2] - ground_z) < tolerance  # Check if z is within [-tolerance, tolerance], it's 3D
 
 
 def epsilon(u):
@@ -70,6 +82,28 @@ uh = problem.solve()
 
 # Create plotter and pyvista grid
 p = pyvista.Plotter()
+# Add title
+p.add_text("Wireframe: Original | Colored Solid: Deformed", 
+           position="upper_edge", 
+           font_size=12, 
+           color="black", 
+           shadow=True)
+
+#----------------- z = 0 plane
+dmax = 0.15511219
+plane_resolution = 10  # Number of subdivisions along each axis
+
+# Generate a grid of points for the plane
+x = np.linspace(-dmax, dmax, plane_resolution)
+y = np.linspace(-dmax, dmax, plane_resolution)
+x, y = np.meshgrid(x, y)
+z = np.ones_like(x)*ground_z  # z = 0 for the entire plan
+# Create the PyVista grid for the plane
+plane = pyvista.StructuredGrid(x, y, z)
+p.add_mesh(plane, color="lightgray", opacity=0.5, label=f"z = {ground_z} Plane")
+
+
+
 topology, cell_types, geometry = plot.vtk_mesh(V)
 grid = pyvista.UnstructuredGrid(topology, cell_types, geometry)
 
@@ -79,12 +113,6 @@ actor_0 = p.add_mesh(grid, style="wireframe", color="k")
 warped = grid.warp_by_vector("u", factor=1.5)
 actor_1 = p.add_mesh(warped, show_edges=True)
 
-# Add title
-p.add_text("Wireframe: Original | Colored Solid: Deformed", 
-           position="upper_edge", 
-           font_size=12, 
-           color="black", 
-           shadow=True)
 
 p.show_axes()
 if not pyvista.OFF_SCREEN:
