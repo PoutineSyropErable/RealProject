@@ -98,7 +98,7 @@ if USE_PRESSURE: # Not linear due to boundary condition and H(x,u), since finger
     # Hence, I'll need a time dependant, linear elastic, but non linear boundary conditions pde.
 
     # Pressure
-    pressure = 1000.0
+    pressure = 10000.0
     p = fem.Constant(domain, default_scalar_type(-pressure))  # Negative for compression
 
     # Traction term with H(x, u)

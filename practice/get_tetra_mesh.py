@@ -1,3 +1,4 @@
+#----------------------get_tetra_mesh.py
 from dolfinx.fem import coordinate_element
 from dolfinx import plot
 import meshio
@@ -39,7 +40,7 @@ print(f"z_min: {z_min}, z_max: {z_max}")
 
 # Calculate required shifts
 # dz = 0.0015
-dz = 0.006
+dz = 0.007
 x_shift = -x_min
 z_shift = -z_min - dz
 y_shift = -(y_min + y_max) / 2  # Center y around 0
@@ -183,3 +184,4 @@ def show_mesh(points, edges):
 show_mesh(points, connectivity)
 
 
+# Clip the mesh using gmsh
