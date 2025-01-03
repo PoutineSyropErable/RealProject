@@ -9,6 +9,7 @@ from mpi4py import MPI
 import ufl
 import numpy as np
 from scipy.spatial import Delaunay
+import matplotlib.pyplot as plt
 DEBUG_ = True
 
 
@@ -100,7 +101,7 @@ pressure = 1
 
 # Time parameters
 t = 0.0
-T = 0.00001  # Total simulation time
+T = 0.001  # Total simulation time
 dt = 5e-8
 num_steps = int(T/dt)
 print(f"dt={dt}")
@@ -331,6 +332,7 @@ for step in range(num_steps):
     # finger_displacement = get_function_value_at_point(domain, u_n, delaunay, finger_inside_object, cells, estimate_avg_cell_size) 
     # print(f"Finger displacement  = {finger_displacement}")
 
+
     
 
 
@@ -357,3 +359,15 @@ if PYVISTA_SHOW:
 
 # Close the XDMF file
 xdmf_file.close()
+
+
+
+max_displacement_array[step] = max_norm
+plt.figure()
+plt.title("Maximum of the norm of u over the domain as a function of t")
+plt.grid()
+plt.xlabel("t")
+plt.ylabel("max(norm(u))")
+plt.plot(t_array, max_displacement_array)
+plt.savefig("max_displacement_vs_time.png", dpi=300, bbox_inches="tight")
+plt.show()
