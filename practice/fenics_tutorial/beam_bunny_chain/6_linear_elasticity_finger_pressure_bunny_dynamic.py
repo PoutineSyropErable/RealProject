@@ -8,7 +8,83 @@ from petsc4py import PETSc
 from mpi4py import MPI
 import ufl
 import numpy as np
+from scipy.spatial import Delaunay
 DEBUG_ = True
+
+
+#--------------------------------------------------------HELPER FUNCTIONS-----------------------------------------
+
+def get_array_from_conn(conn) -> np.ndarray:
+    """
+    Convert mesh topology connectivity to a 2D numpy array.
+
+    Parameters:
+    - conn: The mesh topology connectivity (dolfinx mesh.topology.connectivity).
+
+    Returns:
+    - connectivity_2d: A 2D numpy array where each row contains the vertex indices for a cell.
+    """
+    connectivity_array = conn.array
+    offsets = conn.offsets
+
+    # Convert the flat connectivity array into a list of arrays
+    connectivity_2d = [
+        connectivity_array[start:end]
+        for start, end in zip(offsets[:-1], offsets[1:])
+    ]
+
+    # Convert to numpy array with dtype=object to handle variable-length rows
+    return np.array(connectivity_2d, dtype=object)
+
+
+def get_function_value_at_point(domain, u, delaunay, query_point, cells, estimate_avg_cell_size):
+    #------------------------------Need to work on it, it doesn't work
+    """
+    Evaluate the function `u` at a given query point.
+
+    Parameters:
+    - domain: The mesh domain.
+    - u: The function to evaluate.
+    - delaunay: Delaunay triangulation of the mesh points.
+    - query_point: The point (x, y, z) where the function is to be evaluated.
+
+    Returns:
+    - Value of the function at the query point.
+    """
+    print("\n")
+    # Find the simplex (cell) containing the point
+    simplex = delaunay.find_simplex(query_point)
+    print(f"simplex = {simplex}")
+    if simplex == -1:
+        raise ValueError(f"Point {query_point} is outside the mesh.")
+    
+    # Identify the cell containing the query point
+    point = np.atleast_2d(query_point)
+    print(f"point = {point}")
+    containing_cell = np.array([simplex], dtype=np.int32)[0]
+
+    print(f"containing_cell = {containing_cell}")
+    points_index = connectivity[containing_cell]
+    points_index = points_index.astype(np.int64)
+    print(f"points_index = {points_index}")
+    points_near = points[points_index]
+    print(f"points_near = \n{points_near}\n")
+
+
+    deltas = points_near - query_point 
+    print(f"deltas = \n{deltas}\n")
+    distance = np.linalg.norm(deltas, axis=1)
+    print(f"distance = {distance}")
+    max_distance = np.max(distance)
+    print(f"max_distance = {max_distance}")
+    
+    # Compute the function value at the query point
+    function_value = u.eval(point, containing_cell)
+    return function_value
+
+#-----------------------------------------------------    CODE STARTS --------------------------------------------
+
+
 
 # Material properties
 E = 10e4  # Young's modulus for rubber in Pascals (Pa)
@@ -24,7 +100,7 @@ pressure = 1
 
 # Time parameters
 t = 0.0
-T = 0.001  # Total simulation time
+T = 0.00001  # Total simulation time
 dt = 5e-8
 num_steps = int(T/dt)
 print(f"dt={dt}")
@@ -36,6 +112,7 @@ max_displacement_array = np.zeros(num_steps)
 # Lamé parameters
 mu = E / (2 * (1 + nu))
 lambda_ = (E * nu) / ((1 + nu) * (1 - 2 * nu))
+
 
 
 
@@ -56,6 +133,53 @@ def load_file(filename):
     return domain
 
 domain = load_file("bunny.xdmf")
+# Extract points and cells from the mesh
+points = domain.geometry.x  # Array of vertex coordinates
+topology = domain.topology.connectivity(3, 0)
+connectivity = get_array_from_conn(topology)  # 2D numpy array of cell connectivity
+# Create a Delaunay triangulation
+delaunay = Delaunay(points)
+
+# Get the min and max for each column
+x_min, x_max = points[:, 0].min(), points[:, 0].max()
+y_min, y_max = points[:, 1].min(), points[:, 1].max()
+z_min, z_max = points[:, 2].min(), points[:, 2].max()
+
+pos_min = np.array([x_min, y_min , z_min])
+pos_max = np.array([x_max, y_max , z_max])
+
+center = (pos_min + pos_max)/2 
+bbox_size = (pos_max - pos_min)
+print(f"center = {center}")
+print(f"bbox_size = {bbox_size}")
+
+# Calculate volume
+# PyVista requires a `cells` array where the first value is the number of nodes per cell
+num_cells = connectivity.shape[0]
+print(f"number_cells = {num_cells}")
+num_nodes_per_cell = connectivity.shape[1]
+print(f"num_nodes_per_cell = {num_nodes_per_cell}")
+cells = np.hstack([np.full((num_cells, 1), num_nodes_per_cell), connectivity]).flatten().astype(np.int32)
+
+ # Check the shape and contents of the cells array
+print(f"Shape of cells array: {cells.shape}")
+print(f"First 20 elements of cells array: {cells[:20]}")
+
+# Cell types: 10 corresponds to tetrahedrons in PyVista
+cell_type = np.full(num_cells, 10, dtype=np.uint8)
+
+# Create the PyVista UnstructuredGrid
+tetra_grid = pv.UnstructuredGrid(cells, cell_type, points)
+# Calculate the volume
+volume = tetra_grid.volume
+print(f"Volume of tetrahedral mesh: {volume}")
+
+estimate_avg_cell_size = np.cbrt(volume/num_cells)
+print(f"estimate_avg_cell_size = {estimate_avg_cell_size}")
+
+
+interpol_s = 0.7
+finger_inside_object = interpol_s *(center) + (1 - interpol_s)* finger_position
 
 
 
@@ -136,6 +260,7 @@ if PYVISTA_SHOW:
 xdmf_file = io.XDMFFile(domain.comm, "bunny_displacement.xdmf", "w")
 xdmf_file.write_mesh(domain)  # Write the mesh structure once
 
+
 print("")
 for step in range(num_steps):
     t += dt
@@ -199,28 +324,14 @@ for step in range(num_steps):
     print(f"displacements = \n{displacements}\n")
     print(f"Maximum displacement norm: {max_norm}")
     print(f"Point with maximum displacement: {point_with_max_displacement}")
+
     print(f"Point of finger pressure:        {finger_position}")
+    """ This doesn't work for now"""
+    # print(f"Point of finger (inside):        {finger_inside_object}")
+    # finger_displacement = get_function_value_at_point(domain, u_n, delaunay, finger_inside_object, cells, estimate_avg_cell_size) 
+    # print(f"Finger displacement  = {finger_displacement}")
+
     
-    print(f"type(finger_position) = {type(finger_position)}\n")
-    print(f"np.shape(finger_position) = {np.shape(finger_position)}\n")
-    print(f"finger_position = \n{finger_position}\n")
-
-    # Ensure finger_position is reshaped to (num_points, 3)
-    evaluation_point = finger_position.reshape((1, 3))  # Shape (1, 3)
-    # Compute the bounding box tree for the mesh
-    tree = domain.geometry.bounding_box_tree()
-
-    # Compute collisions
-    collisions = compute_collisions(tree, evaluation_point)
-    cells = select_colliding_cells(collisions, evaluation_point)
-
-    # Check if the point is inside the mesh
-    if len(cells) > 0:
-        # Evaluate the function at the given point
-        displacement = u_n.eval(evaluation_point.T, cells)
-        print(f"Displacement at finger position {finger_position}: {displacement}")
-    else:
-        print(f"Point {finger_position} is outside the mesh!")
 
 
 
