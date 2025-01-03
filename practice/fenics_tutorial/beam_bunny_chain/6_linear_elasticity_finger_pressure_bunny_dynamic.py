@@ -10,6 +10,7 @@ import ufl
 import numpy as np
 from scipy.spatial import Delaunay
 import matplotlib.pyplot as plt
+import h5py
 DEBUG_ = True
 
 
@@ -233,132 +234,105 @@ A.assemble()
 solver.setOperators(A)
 
 
-PYVISTA_SHOW = False
-if PYVISTA_SHOW:
-    #------------------ pyvista initialisation
+# Open HDF5 file to save displacements
+h5_filename = "displacements.h5"
+num_points = domain.geometry.x.shape[0]  # Number of points in the mesh
+NUMBER_OF_STEPS_BETWEEN_WRITES = 1000
+write_index = 0
 
-    # Create the PyVista plotter
-    plotter = pv.Plotter()
-
-    #------------------------------------------------------ FINGER PRESSURE POINT
-    # Define sphere marker for the finger position
-    finger_marker = pv.Sphere(radius=R, center=finger_position)
-    plotter.add_mesh(finger_marker, color="red", label="Finger Position", opacity=1.0)
-
-    #------------------------------------------------------ BUNNY MESH 
-    # Extract mesh data
-    connectivity, cell_types, points = plot.vtk_mesh(V)
-    grid = pv.UnstructuredGrid(connectivity, cell_types, points)
-
-    # Add the initial mesh
-    actor_0 = plotter.add_mesh(grid, style="wireframe", color="k")
-    plotter.show_axes()
-
-    # Open a movie file for the animation
-    plotter.open_movie("bunny_deformation_animation.mp4", framerate=10)
-
-# Open an XDMF file to save u(t)
-xdmf_file = io.XDMFFile(domain.comm, "bunny_displacement.xdmf", "w")
-xdmf_file.write_mesh(domain)  # Write the mesh structure once
-
-
-print("")
-for step in range(num_steps):
-    t += dt
-    print("-----------------------------------------------")
-    print(f"Time step {step+1}/{num_steps}, t = {t:.6f}")
-
-    # Update H(x + u_n)
-    x = ufl.SpatialCoordinate(domain)
-    x_deformed = x + u_n
-    distance = ufl.sqrt(
-        (x_deformed[0] - finger_position[0])**2 +
-        (x_deformed[1] - finger_position[1])**2 +
-        (x_deformed[2] - finger_position[2])**2
+with h5py.File(h5_filename, "w") as h5_file:
+    # Create a dataset for displacements
+    displacements_dset = h5_file.create_dataset(
+        "displacements", 
+        shape=(num_steps//NUMBER_OF_STEPS_BETWEEN_WRITES, num_points, 3), 
+        dtype=np.float32, 
+        compression="gzip"
     )
-    H = ufl.conditional(ufl.lt(distance, R), 1.0, 0.0) # If touching finger
 
-    # Traction term
-    traction_term = H * p * ufl.dot(v, ufl.FacetNormal(domain)) * ufl.ds
-
-    # Linear form
-    L = (
-        rho * ufl.inner(u_tn, v) * ufl.dx
-        + dt * ufl.inner(f, v) * ufl.dx
-        - dt * ufl.inner(sigma(u_n), epsilon(v)) * ufl.dx
-        + dt * traction_term
-    )
-    linear_form = fem.form(L)
-    b = create_vector(linear_form) # L(v)
-
-    # Assemble RHS vector
-    with b.localForm() as loc_b:
-        loc_b.set(0)
-    assemble_vector(b, linear_form)
+    print("")
+    for step in range(num_steps):
+        t += dt
 
 
-    # Solve for velocity update (u_tn1)
-    solver.solve(b, u_tn1.x.petsc_vec)
-    u_tn1.x.scatter_forward()
+        # Update H(x + u_n)
+        x = ufl.SpatialCoordinate(domain)
+        x_deformed = x + u_n
+        distance = ufl.sqrt(
+            (x_deformed[0] - finger_position[0])**2 +
+            (x_deformed[1] - finger_position[1])**2 +
+            (x_deformed[2] - finger_position[2])**2
+        )
+        H = ufl.conditional(ufl.lt(distance, R), 1.0, 0.0) # If touching finger
 
-    # Update displacement
-    u_n.x.array[:] += dt * u_tn1.x.array
-    # Reshape the displacement array to match the (num_points, 3) structure
+        # Traction term
+        traction_term = H * p * ufl.dot(v, ufl.FacetNormal(domain)) * ufl.ds
 
-    # Update velocity for the next time step
-    u_tn.x.array[:] = u_tn1.x.array
-    # Save displacement field to XDMF
-    xdmf_file.write_function(u_n, t)
+        # Linear form
+        L = (
+            rho * ufl.inner(u_tn, v) * ufl.dx
+            + dt * ufl.inner(f, v) * ufl.dx
+            - dt * ufl.inner(sigma(u_n), epsilon(v)) * ufl.dx
+            + dt * traction_term
+        )
+        linear_form = fem.form(L)
+        b = create_vector(linear_form) # L(v)
 
-    displacements = u_n.x.array.reshape(domain.geometry.x.shape)
-    if abs(t - 0.02) < 0.01:
-        print(f"type(displacements) = {type(displacements)}\n")
-        print(f"np.shape(displacements) = {np.shape(displacements)}\n")
-    
-    # Print displacement information for debugging
-    displacement_norms = np.linalg.norm(displacements, axis=1)
-    max_norm = np.max(displacement_norms)
-    max_index = np.argmax(displacement_norms)
-    point_with_max_displacement = domain.geometry.x[max_index]
-    max_displacement_array[step] = max_norm
-
-    print(f"displacements = \n{displacements}\n")
-    print(f"Maximum displacement norm: {max_norm}")
-    print(f"Point with maximum displacement: {point_with_max_displacement}")
-
-    print(f"Point of finger pressure:        {finger_position}")
-    """ This doesn't work for now"""
-    # print(f"Point of finger (inside):        {finger_inside_object}")
-    # finger_displacement = get_function_value_at_point(domain, u_n, delaunay, finger_inside_object, cells, estimate_avg_cell_size) 
-    # print(f"Finger displacement  = {finger_displacement}")
+        # Assemble RHS vector
+        with b.localForm() as loc_b:
+            loc_b.set(0)
+        assemble_vector(b, linear_form)
 
 
-    
+        # Solve for velocity update (u_tn1)
+        solver.solve(b, u_tn1.x.petsc_vec)
+        u_tn1.x.scatter_forward()
+
+        # Update displacement
+        u_n.x.array[:] += dt * u_tn1.x.array
+        # Reshape the displacement array to match the (num_points, 3) structure
+
+        # Update velocity for the next time step
+        u_tn.x.array[:] = u_tn1.x.array
+
+        displacements = u_n.x.array.reshape(domain.geometry.x.shape)
 
 
+        
+        # Print displacement information for debugging
+        displacement_norms = np.linalg.norm(displacements, axis=1)
+        max_norm = np.max(displacement_norms)
+        max_index = np.argmax(displacement_norms)
+        point_with_max_displacement = domain.geometry.x[max_index]
+        max_displacement_array[step] = max_norm
 
+        if (step -1) % NUMBER_OF_STEPS_BETWEEN_WRITES == 0: 
+            print("-----------------------------------------------")
+            print(f"Time step {step+1}/{num_steps}, t = {t:.6f}")
+            if abs(t - 0.02) < 0.01:
+                print(f"type(displacements) = {type(displacements)}\n")
+                print(f"np.shape(displacements) = {np.shape(displacements)}\n")#
 
-    if PYVISTA_SHOW:
-        deformed_points = points + displacements
-        grid.points = deformed_points  # Update PyVista grid points
+            print(f"displacements = \n{displacements}\n")
+            print(f"Maximum displacement norm: {max_norm}")
+            print(f"Point with maximum displacement: {point_with_max_displacement}")
 
-        # Add the deformed mesh to the plotter
-        plotter.add_mesh(grid, show_edges=True, color="lightblue")
-        plotter.write_frame()  # Write the frame to the movie file
+            print(f"Point of finger pressure:        {finger_position}")
+            """ This doesn't work for now"""
+            # print(f"Point of finger (inside):        {finger_inside_object}")
+            # finger_displacement = get_function_value_at_point(domain, u_n, delaunay, finger_inside_object, cells, estimate_avg_cell_size) 
+            # print(f"Finger displacement  = {finger_displacement}")
 
-    print("\n-----------------------------------------------")
+            # Save it to a .h5 file
+            displacements_dset[write_index, :, :] = displacements
+            write_index += 1
+
+            print("\n-----------------------------------------------")
 
 
 
 print("\n\n-----End of Simulation-----\n\n")# Close the movie file
 
 
-if PYVISTA_SHOW:
-    # Close the movie file
-    plotter.close()
-
-# Close the XDMF file
-xdmf_file.close()
 
 
 

@@ -1,73 +1,61 @@
+import h5py
 import numpy as np
-from dolfinx import fem, io
-from mpi4py import MPI
 
-def load_mesh(mesh_file):
+def load_displacement_file(h5_filename):
     """
-    Load the mesh from an XDMF file.
+    Load displacement data from the HDF5 file.
 
     Parameters:
-    - mesh_file: Name of the XDMF file containing the mesh.
+    - h5_filename: The name of the HDF5 file.
 
     Returns:
-    - Mesh object.
+    - displacements: A numpy array representing the displacements.
     """
-    with io.XDMFFile(MPI.COMM_WORLD, mesh_file, "r") as xdmf_file:
-        domain = xdmf_file.read_mesh(name="Grid")
-        print("Mesh loaded successfully.")
-    return domain
+    try:
+        # Open the HDF5 file in read mode
+        with h5py.File(h5_filename, "r") as h5_file:
+            # Ensure the dataset exists
+            if "displacements" not in h5_file:
+                raise ValueError("The dataset 'displacements' does not exist in the file.")
+
+            # Load the displacements dataset
+            displacements = h5_file["displacements"][:]
+            print(f"Loaded displacement data with shape: {displacements.shape}")
+            return displacements
+
+    except Exception as e:
+        print(f"Error loading displacement file: {e}")
+        return None
 
 
-def load_displacement(displacement_file, domain):
-    """
-    Load the displacement function u(t) from an XDMF file using the given mesh.
+def main():
+    # File name
+    h5_filename = "displacements.h5"
 
-    Parameters:
-    - displacement_file: Name of the XDMF file containing the displacement data.
-    - domain: Mesh object.
+    # Load displacement data
+    displacements = load_displacement_file(h5_filename)
+    if displacements is None:
+        print("Failed to load displacement data.")
+        return
 
-    Returns:
-    - List of time steps and their corresponding displacement functions.
-    """
-    V = fem.functionspace(domain, ("Lagrange", 1, (domain.geometry.dim, )))
+    # Display metadata and example data
+    print("\nDataset dimensions: ", displacements.shape)  # (num_steps, num_points, 3)
 
-    with io.XDMFFile(MPI.COMM_WORLD, displacement_file, "r") as xdmf_file:
-        u = fem.Function(V)  # Create a function to store the displacement
-        times = []  # List to store time steps
-        displacements = []  # List to store displacement functions
+    # Show the first 5 time steps and the first 5 points
+    num_t, num_points, _ = displacements.shape
+    print("\nFirst 5 time steps and first 5 points:\n")
+    for t in range(min(5, num_t)):
+        print(f"Time step {t}:")
+        print(displacements[t, :5, :])  # First 5 points for this time step
+        print()
 
-        # Manually iterate through stored functions
-        while True:
-            try:
-                time = xdmf_file.read_function(u, -1)  # Read the next function with its time step
-                times.append(time)
-                displacements.append(u.copy(deepcopy=True))  # Store a deep copy of the function
-            except RuntimeError:
-                # End of file reached
-                break
-
-    return times, displacements
+    # Example: Access displacement for a specific time and point
+    t_index = 0  # Example time step
+    point_index = 0  # Example point
+    print(f"Displacement at time step {t_index}, point {point_index}:")
+    print(displacements[t_index, point_index, :])  # x, y, z displacement
 
 
-# File paths
-mesh_file = "bunny.xdmf"
-displacement_file = "bunny_displacement.xdmf"
-
-# Load mesh
-domain = load_mesh(mesh_file)
-
-# Load displacement data
-times, displacements = load_displacement(displacement_file, domain)
-
-# Output results
-print(f"Number of time steps: {len(times)}")
-for i, time in enumerate(times):
-    print(f"Time step {i + 1}: t = {time}")
-    print(f"Displacement norm: {np.linalg.norm(displacements[i].x.array)}")
-
-# Example: Save the displacement norm over time
-displacement_norms = [np.linalg.norm(u.x.array) for u in displacements]
-np.savetxt("displacement_norms.csv", np.column_stack((times, displacement_norms)), delimiter=",", header="Time,Displacement_Norm")
-
-print("Displacement norms saved to displacement_norms.csv.")
+if __name__ == "__main__":
+    main()
 
