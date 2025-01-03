@@ -77,10 +77,18 @@ solver.setOperators(A)
 solver.setType(PETSc.KSP.Type.PREONLY)
 solver.getPC().setType(PETSc.PC.Type.LU)
 
+
+# Initialize PyVista plotter and animation setup
+plotter = pyvista.Plotter()
+plotter.open_movie("bunny_deformation_animation.mp4", framerate=10)
+plotter.add_axes()
+plotter.add_text("Bunny Deformation Animation", font_size=12, color="black")
+
 for i in range(num_steps):
     t += dt
 
     # Update the right hand side reusing the initial vector
+    print(type(b))
     with b.localForm() as loc_b:
         loc_b.set(0)
     assemble_vector(b, linear_form)
