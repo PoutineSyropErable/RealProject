@@ -24,3 +24,4 @@ main/deformed_bunny_files/
 main/Animations/
 main/calculated_sdf/
 main/displacement_norms/
+main/sdf_points_filtered.h5
