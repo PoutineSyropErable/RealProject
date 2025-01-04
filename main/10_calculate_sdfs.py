@@ -6,6 +6,7 @@ from dolfinx.io.utils import XDMFFile
 from dolfinx import mesh
 from mpi4py import MPI
 
+import argparse
 import os, sys
 
 def load_mesh_domain(xdmf_file):
@@ -63,7 +64,7 @@ def compute_signed_distances(point_list: np.ndarray, mesh_points: np.ndarray, me
 
 
 
-def weight_function(signed_distance: float, weight_exponent: float = 8) -> float:
+def weight_function(signed_distance: float, weight_exponent: float = 10) -> float:
     """Takes a signed_distances and return a probability of taking said points"""
     return (1 + abs(signed_distance)) ** (-weight_exponent)
 
@@ -88,11 +89,21 @@ def filter_points(signed_distances: np.ndarray, weight_exponent: float) -> np.nd
 
 def main():
     print(f"\n\n{'-'*10} Start of Program{'-'*10}\n\n")
+
+    parser = argparse.ArgumentParser(description="Calculate SDF for deformed meshes.")
+    parser.add_argument("--index", type=int, required=True, help="Index of the deformation file.")
+    args = parser.parse_args()
+
+    INDEX = args.index
+    print(f"\n\n{'-' * 10} Processing INDEX: {INDEX} {'-' * 10}\n\n")
+
     os.chdir(sys.path[0])
 
     # Input files
     BUNNY_FILE = "bunny.xdmf"
     DISPLACEMENT_FILE = "./deformed_bunny_files/displacement_{INDEX}.h5"
+    OUTPUT_FILE = f"./calculated_sdf/sdf_points_{INDEX}.h5"
+    os.makedirs("./calculated_sdf", exist_ok=True)
 
     # Load mesh and displacements
     domain = load_mesh_domain(BUNNY_FILE)
@@ -152,8 +163,6 @@ def main():
 
         print(f"Processed time step {t_index}/{displacements_all_times.shape[0]}.")
 
-    # Save SDF results to an HDF5 file
-    OUTPUT_FILE = "./sdf_points.h5"
     with h5py.File(OUTPUT_FILE, "w") as f:
         for t_index, sdf_data in enumerate(sdf_results):
             f.create_dataset(f"time_{t_index}", data=sdf_data)
