@@ -270,6 +270,7 @@ with h5py.File(output_file, "w") as h5_file:
         "displacements", 
         shape=(NUMBER_OF_WRITES, num_points, 3), 
         dtype=np.float32, 
+        # dtype=np.float64, 
         compression="gzip"
     )
 
