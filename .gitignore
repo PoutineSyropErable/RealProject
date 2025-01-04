@@ -22,4 +22,5 @@ old/bunny_deformation.h5
 
 main/deformed_bunny_files/
 main/Animations/
+main/calculated_sdf/
 main/displacement_norms/
