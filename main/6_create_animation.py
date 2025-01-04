@@ -5,9 +5,33 @@ from dolfinx.io import XDMFFile
 from dolfinx import mesh
 from mpi4py import MPI
 
+import os, sys
+import argparse
+
+os.chdir(sys.path[0])
 
 
-INDEX = 0
+# Set up argument parsing
+parser = argparse.ArgumentParser(description="Create animation from deformation data.")
+parser.add_argument("--index", type=int, help="Index of the deformation scenario.")
+parser.add_argument("index_pos", type=int, nargs="?", help="Index of the deformation scenario (positional).")
+
+# Parse arguments
+args = parser.parse_args()
+
+# Determine the index from either --index or positional argument
+if args.index is not None:
+    INDEX = args.index
+elif args.index_pos is not None:
+    INDEX = args.index_pos
+else:
+    parser.error("Index must be provided either as '--index' or as a positional argument.")
+
+print(f"Using index: {INDEX}")
+R = 0.003  # Radius of the sphere
+ANIMATION_FRAMERATE = 20
+
+
 DIRECTORY = "./deformed_bunny_files"
 ANIMATION_DIRECTORY = "./Animations/"
 ANIMATION_FILE = f"{ANIMATION_DIRECTORY}/bunny_deformation_animation_{INDEX}.mp4"
@@ -40,18 +64,21 @@ def get_finger_position(index):
     finger_position = filtered_points[index]
     return finger_position
 
-def animate_displacement(mesh, displacements):
+def animate_displacement(mesh, displacements, finger_position):
     """
     Animate the displacement data on the mesh using PyVista.
     """
     points = mesh.geometry.x.copy()  # Original mesh points
     num_steps = displacements.shape[0]
 
-    # Create PyVista grid
+    # Create PyVista grid of the mesh, This part shows the bunny
     connectivity = mesh.topology.connectivity(3, 0).array.reshape((-1, 4))  # Assuming tetrahedral mesh
     cell_types = np.full(connectivity.shape[0], 10, dtype=np.uint8)  # PyVista tetrahedron cell type is 10
     cells = np.hstack([np.full((connectivity.shape[0], 1), 4), connectivity]).flatten()  # Add node count per cell
     grid = pv.UnstructuredGrid(cells, cell_types, points)
+
+    # 
+
 
     # Add initial displacement norms as scalar data
     displacement_norms = np.linalg.norm(displacements[0], axis=1)
@@ -62,12 +89,16 @@ def animate_displacement(mesh, displacements):
     plotter.add_axes()
     plotter.add_text("Displacement Animation", font_size=12)
 
+    # Define sphere marker for the finger position, and add it to the mesh
+    finger_marker = pv.Sphere(radius=R, center=finger_position)
+    plotter.add_mesh(finger_marker, color="green", label="Finger Position", opacity=1.0)
+
     # Add mesh to the plotter
     actor = plotter.add_mesh(grid, show_edges=True, scalars="Displacement", colormap="coolwarm")
     plotter.show_grid()
 
     # Open movie file for writing
-    plotter.open_movie(ANIMATION_FILE, framerate=10)
+    plotter.open_movie(ANIMATION_FILE, framerate=ANIMATION_FRAMERATE)
 
     for step in range(num_steps):
         # Update points with displacement
@@ -91,7 +122,8 @@ def animate_displacement(mesh, displacements):
 # Load mesh and displacement data
 domain = load_mesh(mesh_file)
 displacement_data = load_displacement_data(displacement_file)
+finger_position = get_finger_position(INDEX)
 
 # Animate displacement
-animate_displacement(domain, displacement_data)
+animate_displacement(domain, displacement_data, finger_position)
 
