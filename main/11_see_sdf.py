@@ -105,6 +105,53 @@ def filter_points(signed_distances: np.ndarray, weight_exponent: float) -> np.nd
     )
     return filtered_index
 
+def draw_bounding_box(
+    b_min: np.ndarray,
+    b_max: np.ndarray,
+    name: str,
+    color: tuple = (0.0, 1.0, 0.0),
+    radius: float = 0.002,
+):
+    """Draw a bounding box in Polyscope given min and max points."""
+    # Create corners of the bounding box
+    box_corners = np.array(
+        [
+            [b_min[0], b_min[1], b_min[2]],
+            [b_max[0], b_min[1], b_min[2]],
+            [b_max[0], b_max[1], b_min[2]],
+            [b_min[0], b_max[1], b_min[2]],
+            [b_min[0], b_min[1], b_max[2]],
+            [b_max[0], b_min[1], b_max[2]],
+            [b_max[0], b_max[1], b_max[2]],
+            [b_min[0], b_max[1], b_max[2]],
+        ]
+    )
+
+    # Define edges for the bounding box
+    box_edges = np.array(
+        [
+            [0, 1],
+            [1, 2],
+            [2, 3],
+            [3, 0],  # Bottom face
+            [4, 5],
+            [5, 6],
+            [6, 7],
+            [7, 4],  # Top face
+            [0, 4],
+            [1, 5],
+            [2, 6],
+            [3, 7],
+        ]
+    )  # Vertical edges
+
+    # Register the bounding box as a curve network
+    ps_bounding_box = ps.register_curve_network(name, box_corners, box_edges)
+    ps_bounding_box.set_radius(radius)  # Adjust bounding box line thickness
+    ps_bounding_box.set_color(color)  # Set the color for the bounding box
+
+
+
 def show_result_in_polyscope(mesh_points, mesh_connectivity, filtered_points, filtered_signed_distances, filtered_nearest):
     ps.init()
     ps_mesh = ps.register_surface_mesh("Bunny", mesh_points, mesh_connectivity)
