@@ -105,6 +105,60 @@ def filter_points(signed_distances: np.ndarray, weight_exponent: float) -> np.nd
     )
     return filtered_index
 
+def show_result_in_polyscope(mesh_points, mesh_connectivity, filtered_points, filtered_signed_distances, filtered_nearest):
+    ps.init()
+    ps_mesh = ps.register_surface_mesh("Bunny", mesh_points, mesh_connectivity)
+
+    NUMBER_OF_POINTS = 20_000
+    ps_cloud = ps.register_point_cloud(
+        "Flitered Points", filtered_points[0:NUMBER_OF_POINTS], radius=0.0025
+    )
+    ps_cloud.add_scalar_quantity(
+        "Signed Distances", filtered_signed_distances[0:NUMBER_OF_POINTS]
+    )
+
+    NUMBER_OF_LINES = 100
+    # Create edges for the curve network
+    edges = np.column_stack(
+        (np.arange(NUMBER_OF_LINES), np.arange(NUMBER_OF_LINES))
+    )  # Connecting filtered points to their nearest points
+
+    # Combine filtered points and filtered nearest points into a single array
+    all_points = np.vstack(
+        (filtered_points[0:NUMBER_OF_LINES], filtered_nearest[0:NUMBER_OF_LINES])
+    )
+    print(f"\n\n\nall_points = \n{all_points}\nShape={np.shape(all_points)}")
+
+    # Create edges that connect filtered_points to filtered_nearest
+    edges = np.column_stack(
+        (np.arange(NUMBER_OF_LINES), np.arange(NUMBER_OF_LINES) + NUMBER_OF_LINES)
+    )  # Adjust edges for the combined array
+    print(f"\n\n\nedges = \n{edges}\nShape={np.shape(edges)}")
+
+    # Register the curve network to show lines from filtered_points to filtered_nearest
+    ps_lines = ps.register_curve_network("Lines to Nearest Points", all_points, edges)
+
+    # Optional: Customize appearance of the lines
+    ps_lines.set_radius(0.001)  # Adjust line thickness
+    ps_lines.set_color((1.0, 0.0, 0.0))  # Red color for the lines
+
+    # Compute and draw the larger bounding box
+    b_min, b_max = compute_bounding_box(mesh_points)
+    draw_bounding_box(
+        b_min, b_max, "Large Bounding Box", color=(0.0, 1.0, 0.0), radius=0.002
+    )
+
+    # Compute and draw the smaller bounding box
+    small_b_min, small_b_max = compute_small_bounding_box(mesh_points)
+    draw_bounding_box(
+        small_b_min,
+        small_b_max,
+        "Small Bounding Box",
+        color=(0.0, 0.0, 1.0),
+        radius=0.001,
+    )
+
+    ps.show()
 
 
 # Define other helper functions as in your original script...
