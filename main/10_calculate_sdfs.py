@@ -92,17 +92,20 @@ def main():
 
     parser = argparse.ArgumentParser(description="Calculate SDF for deformed meshes.")
     parser.add_argument("--index", type=int, required=True, help="Index of the deformation file.")
+    parser.add_argument("--sdf_only", action="store_true", help="Only save the SDF values.")
     args = parser.parse_args()
 
     INDEX = args.index
+    SDF_ONLY = args.sdf_only
     print(f"\n\n{'-' * 10} Processing INDEX: {INDEX} {'-' * 10}\n\n")
+    print(f"SDF only mode: {'Enabled' if SDF_ONLY else 'Disabled'}")
 
     os.chdir(sys.path[0])
 
     # Input files
     BUNNY_FILE = "bunny.xdmf"
-    DISPLACEMENT_FILE = "./deformed_bunny_files/displacement_{INDEX}.h5"
-    OUTPUT_FILE = f"./calculated_sdf/sdf_points_{INDEX}.h5"
+    DISPLACEMENT_FILE = f"./deformed_bunny_files/displacement_{INDEX}.h5"
+    OUTPUT_FILE = f"./calculated_sdf/sdf_points_{INDEX}{'_sdf_only' if SDF_ONLY else ''}.h5"
     os.makedirs("./calculated_sdf", exist_ok=True)
 
     # Load mesh and displacements
@@ -157,9 +160,13 @@ def main():
         # Compute signed distances for the pre-generated points
         signed_distances, _, _ = compute_signed_distances(filtered_points, vertices, faces)
 
-        # Combine points and signed distances
-        sdf_with_points = np.hstack((filtered_points, signed_distances[:, None]))
-        sdf_results.append(sdf_with_points)
+        if SDF_ONLY:
+            # Save only signed distances
+            sdf_results.append(signed_distances)
+        else:
+            # Combine points and signed distances
+            sdf_with_points = np.hstack((filtered_points, signed_distances[:, None]))
+            sdf_results.append(sdf_with_points)
 
         print(f"Processed time step {t_index}/{displacements_all_times.shape[0]}.")
 
