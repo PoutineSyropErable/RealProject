@@ -1,22 +1,19 @@
 import numpy as np
+import igl
 import polyscope as ps
-import pyvista as pv
 import matplotlib.pyplot as plt
 import h5py
-from dolfinx.io.utils import XDMFFile
+import pyvista as pv
+from dolfinx.io import XDMFFile
+from dolfinx import mesh
 from mpi4py import MPI
-import argparse
 import os
 import sys
-import igl
-
-os.chdir(sys.path[0])
+import argparse
 
 # Hardcoded paths
 DISPLACEMENT_DIRECTORY = "./deformed_bunny_files"
 BUNNY_FILE = "bunny.xdmf"
-SDF_DIRECTORY = "./calculated_sdf"
-POINTS_TO_TAKE_SDF_FILE = "points_to_take_sdf.npy"
 
 def load_mesh_domain(xdmf_file):
     with XDMFFile(MPI.COMM_WORLD, xdmf_file, "r") as xdmf:
@@ -43,24 +40,21 @@ def load_mesh_t(xdmf_file, h5_file, time_index):
     return points_moved, connectivity
 
 
+def get_surface_mesh(points: np.ndarray, connectivity: np.ndarray):
+    """Extract the surface mesh from the tetrahedral mesh."""
+    cells = np.hstack([np.full((connectivity.shape[0], 1), 4), connectivity]).flatten()
+    cell_types = np.full(connectivity.shape[0], 10, dtype=np.uint8)  # Tetrahedron type
+    tetra_mesh = pv.UnstructuredGrid(cells, cell_types, points)
 
+    # Extract surface mesh
+    surface_mesh = tetra_mesh.extract_surface()
 
-def load_sdf_data(displacement_index, time_index, sdf_only):
-    """Load SDF data from precomputed files."""
-    if sdf_only:
-        sdf_file = f"{SDF_DIRECTORY}/sdf_points_{displacement_index}_sdf_only.h5"
-        with h5py.File(sdf_file, "r") as f:
-            sdf = f["sdf"][:]
-        points = np.load(POINTS_TO_TAKE_SDF_FILE)
-    else:
-        sdf_file = f"{SDF_DIRECTORY}/sdf_points_{displacement_index}.h5"
-        with h5py.File(sdf_file, "r") as f:
-            if f"time_{time_index}" not in f:
-                raise KeyError(f"Dataset 'time_{time_index}' not found in {sdf_file}.")
-            sdf_data = f[f"time_{time_index}"][:]
-        points = sdf_data[:, :3]  # First three columns are x, y, z
-        sdf = sdf_data[:, 3]     # Fourth column is the SDF
-    return points, sdf
+    # Get vertices and faces
+    vertices = surface_mesh.points
+    faces = surface_mesh.faces.reshape(-1, 4)[:, 1:]  # Remove face size prefix
+
+    return vertices, faces
+
 
 def compute_small_bounding_box(mesh_points: np.ndarray) -> (np.ndarray, np.ndarray):
     """Compute the smallest bounding box for the vertices."""
@@ -82,8 +76,57 @@ def compute_bounding_box(mesh_points: np.ndarray, box_ratio: float = 1.5) -> (np
 
     return b_min, b_max
 
+def generate_random_points(b_min: np.ndarray, b_max: np.ndarray, num_points: int):
+    """Generate random points within the bounding box."""
+    return np.random.uniform(b_min, b_max, size=(num_points, 3))
 
-def draw_bounding_box(b_min: np.ndarray, b_max: np.ndarray,name: str, color: tuple = (0.0, 1.0, 0.0), radius: float = 0.002):
+def compute_signed_distances(point_list: np.ndarray, mesh_points: np.ndarray, mesh_faces: np.ndarray):
+    """Compute signed distances from points to the triangle mesh."""
+    signed_distances, nearest_face, nearest_points = igl.signed_distance(point_list, mesh_points, mesh_faces)
+    return signed_distances, nearest_face, nearest_points
+
+
+
+
+
+def weight_function(signed_distance: float, weight_exponent: float = 10) -> float:
+    """Takes a signed_distances and return a probability of taking said points"""
+    return (1 + abs(signed_distance)) ** (-weight_exponent)
+
+def filter_function(signed_distance: float, weight_exponent: float) -> bool:
+    "Returns a bool or not, deciding weither or not to take the point"
+
+    random_number = np.random.rand()
+    return random_number < weight_function(signed_distance, weight_exponent)
+
+
+def filter_points(signed_distances: np.ndarray, weight_exponent: float) -> np.ndarray:
+    """Filter points based on their signed distances."""
+
+    filtered_index = np.array(
+        [
+            i
+            for i in range(len(signed_distances))
+            if filter_function(signed_distances[i], weight_exponent)
+        ]
+    )
+    return filtered_index
+
+
+
+
+
+
+
+
+
+def draw_bounding_box(
+    b_min: np.ndarray,
+    b_max: np.ndarray,
+    name: str,
+    color: tuple = (0.0, 1.0, 0.0),
+    radius: float = 0.002,
+):
     """Draw a bounding box in Polyscope given min and max points."""
     # Create corners of the bounding box
     box_corners = np.array(
@@ -122,43 +165,30 @@ def draw_bounding_box(b_min: np.ndarray, b_max: np.ndarray,name: str, color: tup
     ps_bounding_box.set_radius(radius)  # Adjust bounding box line thickness
     ps_bounding_box.set_color(color)  # Set the color for the bounding box
 
-def get_surface_mesh(points: np.ndarray, connectivity: np.ndarray):
-    """Extract the surface mesh from the tetrahedral mesh."""
-    cells = np.hstack([np.full((connectivity.shape[0], 1), 4), connectivity]).flatten()
-    cell_types = np.full(connectivity.shape[0], 10, dtype=np.uint8)  # Tetrahedron type
-    tetra_mesh = pv.UnstructuredGrid(cells, cell_types, points)
-
-    # Extract surface mesh
-    surface_mesh = tetra_mesh.extract_surface()
-
-    # Get vertices and faces
-    vertices = surface_mesh.points
-    faces = surface_mesh.faces.reshape(-1, 4)[:, 1:]  # Remove face size prefix
-
-    return vertices, faces
 
 
-def show_result_in_polyscope(mesh_points, mesh_connectivity, filtered_points, filtered_signed_distances):
+def show_result_in_polyscope(mesh_points, mesh_connectivity, filtered_points, filtered_signed_distances, filtered_nearest):
     ps.init()
     ps_mesh = ps.register_surface_mesh("Bunny", mesh_points, mesh_connectivity)
 
-    NUMBER_OF_POINTS = min(20_000, len(filtered_points))
+    NUMBER_OF_POINTS = 20_000
     ps_cloud = ps.register_point_cloud(
-        "Filtered Points", filtered_points[:NUMBER_OF_POINTS], radius=0.0025
+        "Flitered Points", filtered_points[0:NUMBER_OF_POINTS], radius=0.0025
     )
     ps_cloud.add_scalar_quantity(
-        "Signed Distances", filtered_signed_distances[:NUMBER_OF_POINTS]
+        "Signed Distances", filtered_signed_distances[0:NUMBER_OF_POINTS]
     )
 
-    NUMBER_OF_LINES = min(100, len(filtered_points))
+    NUMBER_OF_LINES = 100
+    # Create edges for the curve network
+    edges = np.column_stack(
+        (np.arange(NUMBER_OF_LINES), np.arange(NUMBER_OF_LINES))
+    )  # Connecting filtered points to their nearest points
 
-    # Calculate the nearest points only for the points used in the lines
-    line_filtered_points = filtered_points[:NUMBER_OF_LINES]
-    vertices, faces = get_surface_mesh(mesh_points, mesh_connectivity)
-    _, _, filtered_nearest = igl.signed_distance(line_filtered_points, vertices, faces)
-
-    # Combine filtered points and their nearest points into a single array
-    all_points = np.vstack((line_filtered_points, filtered_nearest))
+    # Combine filtered points and filtered nearest points into a single array
+    all_points = np.vstack(
+        (filtered_points[0:NUMBER_OF_LINES], filtered_nearest[0:NUMBER_OF_LINES])
+    )
     print(f"\n\n\nall_points = \n{all_points}\nShape={np.shape(all_points)}")
 
     # Create edges that connect filtered_points to filtered_nearest
@@ -193,15 +223,33 @@ def show_result_in_polyscope(mesh_points, mesh_connectivity, filtered_points, fi
     ps.show()
 
 
+# Define other helper functions as in your original script...
 
 def main():
-    parser = argparse.ArgumentParser(description="Visualize mesh displacement using precomputed SDF.")
-    parser.add_argument("index", type=int, nargs="?", help="Index of the displacement file to use.")
-    parser.add_argument("time_index", type=int, nargs="?", help="Index of the time step to visualize.")
-    parser.add_argument("--index", "--displacement_index", type=int, help="Index of the displacement file to use.")
-    parser.add_argument("--time_index", type=int, help="Index of the time step to visualize.")
-    parser.add_argument("--sdfonly", action="store_true", help="Use precomputed SDF-only data.")
-
+    parser = argparse.ArgumentParser(description="Visualize mesh displacement using polyscope.")
+    parser.add_argument(
+        "index",
+        type=int,
+        nargs="?",
+        help="Index of the displacement file to use.",
+    )
+    parser.add_argument(
+        "time_index",
+        type=int,
+        nargs="?",
+        help="Index of the time step to visualize.",
+    )
+    parser.add_argument(
+        "--index", "--displacement_index",
+        type=int,
+        help="Index of the displacement file to use.",
+    )
+    parser.add_argument(
+        "--time_index",
+        type=int,
+        help="Index of the time step to visualize.",
+    )
+    
     args = parser.parse_args()
 
     # Determine displacement and time indices
@@ -213,28 +261,36 @@ def main():
     if time_index is None and len(sys.argv) > 2:
         time_index = int(sys.argv[2])
 
+    # Default values if not provided
     displacement_index = displacement_index if displacement_index is not None else 0
     time_index = time_index if time_index is not None else 10
 
-    sdf_only = args.sdfonly
-
-    print(f"Using displacement index: {displacement_index}")
-    print(f"Using time index: {time_index}")
-    print(f"SDF-only mode: {sdf_only}")
-
-
     # Construct file paths
     displacement_file = f"{DISPLACEMENT_DIRECTORY}/displacement_{displacement_index}.h5"
+    
+    print(f"Using displacement file: {displacement_file}")
+    print(f"Using bunny file: {BUNNY_FILE}")
+    print(f"Time index: {time_index}")
+
+    # Load and process the mesh
     mesh_points, mesh_connectivity = load_mesh_t(BUNNY_FILE, displacement_file, time_index)
 
-    # Load precomputed SDF data
-    points, sdf = load_sdf_data(displacement_index, time_index, sdf_only)
+    vertices, faces = get_surface_mesh(mesh_points, mesh_connectivity)
 
-    print(f"Loaded points shape: {points.shape}")
-    print(f"Loaded SDF shape: {sdf.shape}")
+    b_min, b_max = compute_bounding_box(vertices)
+    point_list = generate_random_points(b_min, b_max, 1_000_000)
+    signed_distances, nearest_face, nearest_points = compute_signed_distances(
+        point_list, vertices, faces
+    )
 
+    filtered_index = filter_points(signed_distances, weight_exponent=20)
+    filtered_signed_distances = signed_distances[filtered_index]
+    filtered_points = point_list[filtered_index]
+    filtered_nearest = nearest_points[filtered_index]
 
-    show_result_in_polyscope(mesh_points, mesh_connectivity, points, sdf)
+    show_result_in_polyscope(
+        mesh_points, mesh_connectivity, filtered_points, filtered_signed_distances, filtered_nearest
+    )
 
 if __name__ == "__main__":
     main()
