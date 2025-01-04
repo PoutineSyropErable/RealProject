@@ -27,4 +27,4 @@ python ./1_get_tetra_mesh.py
 python ./2_get_points_to_apply_force.py
 python ./3_filter_points.py
 
-python ./5_filter_points.py
+python ./5_iterate_simulations.py
