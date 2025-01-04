@@ -11,8 +11,10 @@ import numpy as np
 from scipy.spatial import Delaunay
 import matplotlib.pyplot as plt
 import h5py
+import os, sys
 DEBUG_ = True
 
+os.chdir(sys.path[0])
 
 #--------------------------------------------------------HELPER FUNCTIONS-----------------------------------------
 
@@ -89,7 +91,7 @@ def get_function_value_at_point(domain, u, delaunay, query_point, cells, estimat
 
 
 # Material properties
-E = 10e4  # Young's modulus for rubber in Pascals (Pa)
+E = 5*10e3  # Young's modulus for rubber in Pascals (Pa)
 nu = 0.40  # Poisson's ratio for rubber
 rho = 1 # Some rubber that weighs as much as metal
 
@@ -97,14 +99,14 @@ rho = 1 # Some rubber that weighs as much as metal
 finger_position = np.array([0.098629, 0.004755, 0.118844])
 R = 0.003  # Radius of the sphere
 # Pressure
-pressure = 1
+pressure = 40000
 
 
 # Time parameters
 t = 0.0
 T = 0.001  # Total simulation time
 dt = 5e-8
-num_steps = int(T/dt)
+num_steps = int(T/dt + 1) 
 print(f"dt={dt}")
 
 # Initialize arrays to store time and maximum displacement
@@ -236,20 +238,32 @@ solver.setOperators(A)
 
 # Open HDF5 file to save displacements
 h5_filename = "displacements.h5"
+if os.path.exists(h5_filename):
+    print(f"File {h5_filename} already exists. Removing it.")
+    os.remove(h5_filename)
+else:
+    print(f"File {h5_filename} does not exist. Proceeding.")
+
+
 num_points = domain.geometry.x.shape[0]  # Number of points in the mesh
-NUMBER_OF_STEPS_BETWEEN_WRITES = 1000
+NUMBER_OF_STEPS_BETWEEN_WRITES = 200
 write_index = 0
+
+NUMBER_OF_WRITES = (num_steps + NUMBER_OF_STEPS_BETWEEN_WRITES - 1) // NUMBER_OF_STEPS_BETWEEN_WRITES
+
+print(f"NUMBER OF WRITES: {NUMBER_OF_WRITES}\n")
 
 with h5py.File(h5_filename, "w") as h5_file:
     # Create a dataset for displacements
     displacements_dset = h5_file.create_dataset(
         "displacements", 
-        shape=(num_steps//NUMBER_OF_STEPS_BETWEEN_WRITES, num_points, 3), 
+        shape=(NUMBER_OF_WRITES, num_points, 3), 
         dtype=np.float32, 
         compression="gzip"
     )
 
     print("")
+    print(f"before loop: t = {t}")
     for step in range(num_steps):
         t += dt
 
@@ -305,19 +319,23 @@ with h5py.File(h5_filename, "w") as h5_file:
         point_with_max_displacement = domain.geometry.x[max_index]
         max_displacement_array[step] = max_norm
 
-        if (step -1) % NUMBER_OF_STEPS_BETWEEN_WRITES == 0: 
+
+        if write_index >= NUMBER_OF_WRITES:
+            print(f"Warning: write_index ({write_index}) exceeds NUMBER_OF_WRITES ({NUMBER_OF_WRITES})!")
+            break
+
+
+        if step == num_steps - 1 or (step % NUMBER_OF_STEPS_BETWEEN_WRITES) == 0:
             print("-----------------------------------------------")
-            print(f"Time step {step+1}/{num_steps}, t = {t:.6f}")
-            if abs(t - 0.02) < 0.01:
-                print(f"type(displacements) = {type(displacements)}\n")
-                print(f"np.shape(displacements) = {np.shape(displacements)}\n")#
+            print(f"Time step {step+1}/{num_steps}, t = {t}")
+
 
             print(f"displacements = \n{displacements}\n")
             print(f"Maximum displacement norm: {max_norm}")
             print(f"Point with maximum displacement: {point_with_max_displacement}")
 
-            print(f"Point of finger pressure:        {finger_position}")
             """ This doesn't work for now"""
+            # print(f"Point of finger pressure:        {finger_position}")
             # print(f"Point of finger (inside):        {finger_inside_object}")
             # finger_displacement = get_function_value_at_point(domain, u_n, delaunay, finger_inside_object, cells, estimate_avg_cell_size) 
             # print(f"Finger displacement  = {finger_displacement}")
@@ -336,12 +354,14 @@ print("\n\n-----End of Simulation-----\n\n")# Close the movie file
 
 
 
-max_displacement_array[step] = max_norm
-plt.figure()
-plt.title("Maximum of the norm of u over the domain as a function of t")
-plt.grid()
-plt.xlabel("t")
-plt.ylabel("max(norm(u))")
-plt.plot(t_array, max_displacement_array)
-plt.savefig("max_displacement_vs_time.png", dpi=300, bbox_inches="tight")
-plt.show()
+PLOT = False
+if PLOT:
+    max_displacement_array[step] = max_norm
+    plt.figure()
+    plt.title("Maximum of the norm of u over the domain as a function of t")
+    plt.grid()
+    plt.xlabel("t")
+    plt.ylabel("max(norm(u))")
+    plt.plot(t_array, max_displacement_array)
+    plt.savefig("max_displacement_vs_time.png", dpi=300, bbox_inches="tight")
+    plt.show()
