@@ -105,6 +105,42 @@ def filter_points(signed_distances: np.ndarray, weight_exponent: float) -> np.nd
     )
     return filtered_index
 
+def compute_bounding_box(mesh_points: np.ndarray) -> (np.ndarray, np.ndarray):
+    """Compute the bounding box for the vertices."""
+    b_min = np.zeros(3)
+    b_max = np.zeros(3)
+
+    for i in range(3):
+        min_val, max_val = mesh_points[:, i].min(), mesh_points[:, i].max()
+        print("min, max=", min_val, max_val)
+
+        center = (min_val + max_val) / 2
+        half_length = max_val - center
+
+        BOX_RATIO = 1.5
+
+        print("c,h=", center, half_length)
+
+        b_min[i] = center - half_length * BOX_RATIO
+        b_max[i] = center + half_length * BOX_RATIO
+
+    return b_min, b_max
+
+
+def compute_small_bounding_box(mesh_points: np.ndarray) -> (np.ndarray, np.ndarray):
+    b_min = np.zeros(3)
+    b_max = np.zeros(3)
+
+    for i in range(3):
+        min_val, max_val = mesh_points[:, i].min(), mesh_points[:, i].max()
+        b_min[i] = min_val
+        b_max[i] = max_val
+
+    return b_min, b_max
+
+
+
+
 def draw_bounding_box(
     b_min: np.ndarray,
     b_max: np.ndarray,
