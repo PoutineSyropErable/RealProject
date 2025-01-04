@@ -365,9 +365,13 @@ with h5py.File(output_file, "w") as h5_file:
 
 print("\n\n-----End of Simulation-----\n\n")# Close the movie file
 
-
-
-
+# Directory for displacement norms
+DISPLACEMENT_NORMS_DIR = "./displacement_norms"
+os.makedirs(DISPLACEMENT_NORMS_DIR, exist_ok=True)
+# Save max_displacement_array to a file
+output_file = os.path.join(DISPLACEMENT_NORMS_DIR, f"max_displacement_array_{index}.txt")
+np.savetxt(output_file, max_displacement_array, fmt="%.6f")
+print(f"Saved max displacement array to {output_file}")
 
 PLOT = False
 if PLOT:

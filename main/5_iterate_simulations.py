@@ -2,6 +2,8 @@ import subprocess
 import numpy as np
 import os
 
+STARTING_INDEX = 15
+
 # File containing filtered points
 FILTERED_POINTS_FILE = "filtered_points_of_force_on_boundary.txt"
 
@@ -19,8 +21,9 @@ if not os.path.exists(FILTERED_POINTS_FILE):
 # Load the filtered points
 filtered_points = np.loadtxt(FILTERED_POINTS_FILE, skiprows=1)
 
+
 # Iterate over each row and run the simulation
-for index, finger_position in enumerate(filtered_points):
+for index, finger_position in enumerate(filtered_points[STARTING_INDEX:], start=STARTING_INDEX):
     # Convert finger position to string for passing as arguments
     finger_position_str = ' '.join(map(str, finger_position))
     

@@ -15,6 +15,7 @@ os.chdir(sys.path[0])
 parser = argparse.ArgumentParser(description="Create animation from deformation data.")
 parser.add_argument("--index", type=int, help="Index of the deformation scenario.")
 parser.add_argument("index_pos", type=int, nargs="?", help="Index of the deformation scenario (positional).")
+parser.add_argument("--offscreen", action="store_true", help="Enable offscreen rendering for the animation.")
 
 # Parse arguments
 args = parser.parse_args()
@@ -64,7 +65,7 @@ def get_finger_position(index):
     finger_position = filtered_points[index]
     return finger_position
 
-def animate_displacement(mesh, displacements, finger_position):
+def animate_displacement(mesh, displacements, finger_position, offscreen):
     """
     Animate the displacement data on the mesh using PyVista.
     """
@@ -85,7 +86,7 @@ def animate_displacement(mesh, displacements, finger_position):
     grid.point_data["Displacement"] = displacement_norms
 
     # Setup PyVista plotter
-    plotter = pv.Plotter()
+    plotter = pv.Plotter(off_screen=offscreen)
     plotter.add_axes()
     plotter.add_text("Displacement Animation", font_size=12)
 
@@ -125,5 +126,5 @@ displacement_data = load_displacement_data(displacement_file)
 finger_position = get_finger_position(INDEX)
 
 # Animate displacement
-animate_displacement(domain, displacement_data, finger_position)
+animate_displacement(domain, displacement_data, finger_position, args.offscreen)
 
