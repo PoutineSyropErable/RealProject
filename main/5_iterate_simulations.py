@@ -2,7 +2,8 @@ import subprocess
 import numpy as np
 import os
 
-STARTING_INDEX = 271
+STARTING_INDEX = 0
+STOPPING_INDEX = 15  # Included; set to -1 to process until the end.
 
 # File containing filtered points
 FILTERED_POINTS_FILE = "filtered_points_of_force_on_boundary.txt"
@@ -21,9 +22,22 @@ if not os.path.exists(FILTERED_POINTS_FILE):
 # Load the filtered points
 filtered_points = np.loadtxt(FILTERED_POINTS_FILE, skiprows=1)
 
+# Adjust stopping index if -1
+if STOPPING_INDEX == -1:
+    STOPPING_INDEX = len(filtered_points) - 1
+
+# Validate indices
+if STARTING_INDEX < 0 or STARTING_INDEX >= len(filtered_points):
+    raise ValueError(f"STARTING_INDEX ({STARTING_INDEX}) is out of range.")
+if STOPPING_INDEX < 0 or STOPPING_INDEX >= len(filtered_points):
+    raise ValueError(f"STOPPING_INDEX ({STOPPING_INDEX}) is out of range.")
+if STOPPING_INDEX < STARTING_INDEX:
+    raise ValueError(f"STOPPING_INDEX ({STOPPING_INDEX}) cannot be less than STARTING_INDEX ({STARTING_INDEX}).")
+
+print(f"Processing range: STARTING_INDEX={STARTING_INDEX}, STOPPING_INDEX={STOPPING_INDEX}")
 
 # Iterate over each row and run the simulation
-for index, finger_position in enumerate(filtered_points[STARTING_INDEX:], start=STARTING_INDEX):
+for index, finger_position in enumerate(filtered_points[STARTING_INDEX:STOPPING_INDEX + 1], start=STARTING_INDEX):
     # Convert finger position to string for passing as arguments
     finger_position_str = ' '.join(map(str, finger_position))
     
@@ -36,10 +50,10 @@ for index, finger_position in enumerate(filtered_points[STARTING_INDEX:], start=
         "--finger_position", *map(str, finger_position)
     ]
     try:
-        subprocess.run(command, check=True)
-        print(f"Simulation {index} completed successfully.\n")
+        result = subprocess.run(command, check=True, text=False, capture_output=False)
+        print(f"Simulation {index} completed successfully.\nOutput:\n{result.stdout}")
     except subprocess.CalledProcessError as e:
-        print(f"Simulation {index} failed with error: {e}\n")
+        print(f"Simulation {index} failed with error: {e}\nStderr:\n{e.stderr}")
         continue  # Skip to the next simulation
 
 print("All simulations completed.")
