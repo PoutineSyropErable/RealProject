@@ -2,8 +2,8 @@ import subprocess
 import numpy as np
 import os
 
-STARTING_INDEX = 0
-STOPPING_INDEX = 15  # Included; set to -1 to process until the end.
+STARTING_INDEX = 270
+STOPPING_INDEX = -1  # Included; set to -1 to process until the end.
 
 # File containing filtered points
 FILTERED_POINTS_FILE = "filtered_points_of_force_on_boundary.txt"

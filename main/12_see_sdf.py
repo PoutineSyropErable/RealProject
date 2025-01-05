@@ -47,23 +47,42 @@ def load_mesh_t(xdmf_file, h5_file, time_index):
 
 
 
-
 def load_sdf_data(displacement_index, time_index, sdf_only):
-    """Load SDF data from precomputed files."""
-    if sdf_only:
-        sdf_file = f"{SDF_DIRECTORY}/sdf_points_{displacement_index}_sdf_only.h5"
-        with h5py.File(sdf_file, "r") as f:
-            sdf = f["sdf"][:]
-        points = np.load(POINTS_TO_TAKE_SDF_FILE)
-    else:
-        sdf_file = f"{SDF_DIRECTORY}/sdf_points_{displacement_index}.h5"
-        with h5py.File(sdf_file, "r") as f:
-            if f"time_{time_index}" not in f:
-                raise KeyError(f"Dataset 'time_{time_index}' not found in {sdf_file}.")
-            sdf_data = f[f"time_{time_index}"][:]
-        points = sdf_data[:, :3]  # First three columns are x, y, z
-        sdf = sdf_data[:, 3]     # Fourth column is the SDF
-    return points, sdf
+    """
+    Load SDF data for a specific displacement index and time index.
+
+    Args:
+        displacement_index (int): Index of the displacement file.
+        time_index (int): Time index for SDF data.
+        sdf_only (bool): Whether to load only the SDF values.
+
+    Returns:
+        tuple: (points, sdf) if not sdf_only, otherwise just sdf.
+    """
+    file_suffix = "_sdf_only" if sdf_only else ""
+    input_file = f"./calculated_sdf/sdf_points_{displacement_index}{file_suffix}.h5"
+
+    print(f"Loading SDF data from: {input_file}")
+    
+    with h5py.File(input_file, "r") as f:
+        dataset_name = f"time_{time_index}"
+        if dataset_name not in f:
+            raise KeyError(f"Dataset '{dataset_name}' not found in file {input_file}.")
+        
+        data = f[dataset_name][:]
+        
+        if sdf_only:
+            # Return only the SDF values
+            sdf = data
+            points = np.load(POINTS_TO_TAKE_SDF_FILE)
+        else:
+            # Return points and SDF values
+            points = data[:, :3]
+            sdf = data[:, 3]
+
+        return points, sdf
+
+
 
 def compute_small_bounding_box(mesh_points: np.ndarray) -> (np.ndarray, np.ndarray):
     """Compute the smallest bounding box for the vertices."""
@@ -207,31 +226,37 @@ def show_result_in_polyscope(mesh_points, mesh_connectivity, filtered_points, fi
 
     ps.show()
 
-
+def validate_indices(index, displacement_index):
+    """Validate if both index and displacement_index are provided and consistent."""
+    if index is not None and displacement_index is not None and index != displacement_index:
+        raise ValueError(
+            f"Inconsistent indices: --index={index} and --displacement_index={displacement_index}. "
+            f"Please provide matching values or only one of these arguments."
+        )
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize mesh displacement using precomputed SDF.")
-    parser.add_argument("index", type=int, nargs="?", help="Index of the displacement file to use.")
-    parser.add_argument("time_index", type=int, nargs="?", help="Index of the time step to visualize.")
-    parser.add_argument("--index", "--displacement_index", type=int, help="Index of the displacement file to use.")
+    parser.add_argument("positional_index", type=int, nargs="?", help="Positional index of the displacement file.")
+    parser.add_argument("positional_time_index", type=int, nargs="?", help="Positional index of the time step.")
+    parser.add_argument("--index", type=int, help="Index of the displacement file to use.")
+    parser.add_argument("--displacement_index", type=int, help="Alternative index of the displacement file to use.")
     parser.add_argument("--time_index", type=int, help="Index of the time step to visualize.")
-    parser.add_argument("--sdfonly", action="store_true", help="Use precomputed SDF-only data.")
+    parser.add_argument("--sdf_only", action="store_true", help="Use precomputed SDF-only data.")
 
     args = parser.parse_args()
 
-    # Determine displacement and time indices
-    displacement_index = args.index or args.displacement_index
-    time_index = args.time_index
+    # Resolve indices
+    displacement_index = args.index or args.displacement_index or args.positional_index
+    time_index = args.time_index or args.positional_time_index
 
-    if displacement_index is None and len(sys.argv) > 1:
-        displacement_index = int(sys.argv[1])
-    if time_index is None and len(sys.argv) > 2:
-        time_index = int(sys.argv[2])
-
+    # Ensure defaults if not provided
     displacement_index = displacement_index if displacement_index is not None else 0
     time_index = time_index if time_index is not None else 10
 
-    sdf_only = args.sdfonly
+    # Validate consistency
+    validate_indices(args.index, args.displacement_index)
+
+    sdf_only = args.sdf_only
 
     print(f"Using displacement index: {displacement_index}")
     print(f"Using time index: {time_index}")
@@ -250,8 +275,25 @@ def main():
     displacement_file = f"{DISPLACEMENT_DIRECTORY}/displacement_{displacement_index}.h5"
     mesh_points, mesh_connectivity = load_mesh_t(BUNNY_FILE, displacement_file, time_index)
 
+    print(f"np.shape(mesh_points) = {np.shape(mesh_points)}")
+    print(f"mesh_points = \n{mesh_points}\n")
+
+    print(f"np.shape(mesh_connectivity) = {np.shape(mesh_connectivity)}")
+    print(f"mesh_connectivity = \n{mesh_connectivity}\n")
+
+
+
+
+
     # Load precomputed SDF data
     points, sdf = load_sdf_data(displacement_index, time_index, sdf_only)
+    print(f"np.shape(points) = {np.shape(points)}")
+    print(f"points = \n{points}\n")
+
+    print(f"np.shape(sdf) = {np.shape(sdf)}")
+    print(f"sdf = \n{sdf}\n")
+
+
 
 
     # Swap Y and Z because poylscope use weird data
