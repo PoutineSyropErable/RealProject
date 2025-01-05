@@ -13,3 +13,12 @@ I need to do tomorrow
 
 Link to the google docs with the files that aren't git tracked
 https://drive.google.com/drive/folders/1vpslQHkE8iSuIB2wGIodClNLWq8q9kgH?usp=sharing
+
+
+On the google drive, there is only the first 30 sdf rather then 2000 of them. I'm aiming for 550 on my machine, which will be like 200ish GB of 
+data. Could be fine tuned. But No time for that.
+
+Anyway, the AI training will be more about potentially showing it could be done. Completing the training or fine tuning the pipe line ish
+not something i have time to do. 
+
+Maybe in my free time, I'll do it later.
