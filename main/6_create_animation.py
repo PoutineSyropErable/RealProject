@@ -1,130 +1,183 @@
 import h5py
 import numpy as np
 import pyvista as pv
-from dolfinx.io import XDMFFile
 from dolfinx import mesh
+from dolfinx.io.utils import XDMFFile
 from mpi4py import MPI
-
-import os, sys
+from typing import Tuple
 import argparse
+import os, sys
 
+# Ensure the working directory is correct
 os.chdir(sys.path[0])
 
 
-# Set up argument parsing
-parser = argparse.ArgumentParser(description="Create animation from deformation data.")
-parser.add_argument("--index", type=int, help="Index of the deformation scenario.")
-parser.add_argument("index_pos", type=int, nargs="?", help="Index of the deformation scenario (positional).")
-parser.add_argument("--offscreen", action="store_true", help="Enable offscreen rendering for the animation.")
-
-# Parse arguments
-args = parser.parse_args()
-
-# Determine the index from either --index or positional argument
-if args.index is not None:
-    INDEX = args.index
-elif args.index_pos is not None:
-    INDEX = args.index_pos
-else:
-    parser.error("Index must be provided either as '--index' or as a positional argument.")
-
-print(f"Using index: {INDEX}")
-R = 0.003  # Radius of the sphere
-ANIMATION_FRAMERATE = 20
-
-
-DIRECTORY = "./deformed_bunny_files"
-ANIMATION_DIRECTORY = "./Animations/"
-ANIMATION_FILE = f"{ANIMATION_DIRECTORY}/bunny_deformation_animation_{INDEX}.mp4"
-mesh_file = "bunny.xdmf"
-displacement_file = f"{DIRECTORY}/displacement_{INDEX}.h5"
-FILTERED_POINTS_FILE = "./filtered_points_of_force_on_boundary.txt"
-
-
-def load_mesh(xdmf_file):
+def load_file(filename: str) -> mesh.Mesh:
     """
     Load the mesh from an XDMF file.
+
+    Parameters:
+        filename (str): Path to the XDMF file.
+
+    Returns:
+        mesh.Mesh: The loaded mesh object.
     """
-    with XDMFFile(MPI.COMM_WORLD, xdmf_file, "r") as xdmf:
-        domain = xdmf.read_mesh(name="Grid")
+    with XDMFFile(MPI.COMM_WORLD, filename, "r") as xdmf:
+        domain: mesh.Mesh = xdmf.read_mesh(name="Grid")
         print("Mesh loaded successfully!")
     return domain
 
-def load_displacement_data(h5_file):
+
+def get_array_from_conn(conn) -> np.ndarray:
     """
-    Load displacement data from an HDF5 file.
+    Convert mesh topology connectivity to a 2D numpy array.
+
+    Parameters:
+        conn: The mesh topology connectivity (dolfinx mesh.topology.connectivity).
+
+    Returns:
+        np.ndarray: A 2D numpy array where each row contains the vertex indices for a cell.
     """
+    connectivity_array = conn.array
+    offsets = conn.offsets
+
+    # Convert the flat connectivity array into a list of arrays
+    connectivity_2d = [connectivity_array[start:end] for start, end in zip(offsets[:-1], offsets[1:])]
+
+    return np.array(connectivity_2d, dtype=object)
+
+
+def get_mesh(filename: str) -> Tuple[mesh.Mesh, np.ndarray, np.ndarray]:
+    """
+    Extract points and connectivity from the mesh.
+
+    Parameters:
+        filename (str): Path to the XDMF file.
+
+    Returns:
+        Tuple[mesh.Mesh, np.ndarray, np.ndarray]: The mesh object, points, and connectivity array.
+    """
+    domain = load_file(filename)
+    points = domain.geometry.x  # Array of vertex coordinates
+    conn = domain.topology.connectivity(3, 0)
+    connectivity = get_array_from_conn(conn).astype(np.int64)  # Convert to 2D numpy array
+
+    return domain, points, connectivity
+
+
+def load_deformations(h5_file: str) -> dict:
+    """
+    Load deformation data from an HDF5 file.
+
+    Parameters:
+        h5_file (str): Path to the HDF5 file containing deformation data.
+
+    Returns:
+        dict: A dictionary where keys are time steps and values are displacement arrays.
+    """
+    deformations = {}
     with h5py.File(h5_file, "r") as f:
-        displacements = f["displacements"][:]
-        print(f"Loaded displacement data with shape: {displacements.shape}")
-    return displacements
+        # Access the 'Function' -> 'f' group
+        function_group = f["Function"]
+        f_group = function_group["f"]
+
+        # Extract datasets for each time step
+        for time_step in f_group.keys():
+            dataset = f_group[time_step]
+            deformations[time_step] = dataset[...]
+            print(f"Loaded deformation for time step {time_step}, Shape: {dataset.shape}")
+
+    return deformations
 
 
-def get_finger_position(index):    
-    filtered_points = np.loadtxt(FILTERED_POINTS_FILE, skiprows=1)
-    finger_position = filtered_points[index]
-    return finger_position
-
-def animate_displacement(mesh, displacements, finger_position, offscreen):
+def load_mesh_and_deformations(xdmf_file: str, h5_file: str):
     """
-    Animate the displacement data on the mesh using PyVista.
-    """
-    points = mesh.geometry.x.copy()  # Original mesh points
-    num_steps = displacements.shape[0]
+    Load mesh points and deformation data.
 
-    # Create PyVista grid of the mesh, This part shows the bunny
-    connectivity = mesh.topology.connectivity(3, 0).array.reshape((-1, 4))  # Assuming tetrahedral mesh
-    cell_types = np.full(connectivity.shape[0], 10, dtype=np.uint8)  # PyVista tetrahedron cell type is 10
-    cells = np.hstack([np.full((connectivity.shape[0], 1), 4), connectivity]).flatten()  # Add node count per cell
+    Parameters:
+        xdmf_file (str): Path to the XDMF file for the mesh.
+        h5_file (str): Path to the HDF5 file for deformation data.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, dict]: The mesh points, connectivity, and deformation dictionary.
+    """
+    # Load the mesh
+    _, points, connectivity = get_mesh(xdmf_file)
+
+    # Load the deformations
+    deformations = load_deformations(h5_file)
+
+    return points, connectivity, deformations
+
+
+def animate_deformation(
+    points: np.ndarray, connectivity: np.ndarray, deformations: dict, finger_position: np.ndarray, output_file: str, offscreen: bool
+):
+    """
+    Animate the deformation of the mesh using PyVista.
+
+    Parameters:
+        points (np.ndarray): The initial points of the mesh.
+        connectivity (np.ndarray): The connectivity of the mesh.
+        deformations (dict): The deformation data for each time step.
+        finger_position (np.ndarray): The position of the finger marker.
+        output_file (str): Path to save the animation.
+        offscreen (bool): Whether to enable offscreen rendering.
+    """
+    # Create a PyVista UnstructuredGrid
+    num_cells = connectivity.shape[0]
+    cells = np.hstack([np.full((num_cells, 1), connectivity.shape[1]), connectivity]).flatten()
+    cell_types = np.full(num_cells, 10, dtype=np.uint8)  # 10 corresponds to tetrahedrons in PyVista
     grid = pv.UnstructuredGrid(cells, cell_types, points)
-
-    # 
-
-
-    # Add initial displacement norms as scalar data
-    displacement_norms = np.linalg.norm(displacements[0], axis=1)
-    grid.point_data["Displacement"] = displacement_norms
 
     # Setup PyVista plotter
     plotter = pv.Plotter(off_screen=offscreen)
     plotter.add_axes()
-    plotter.add_text("Displacement Animation", font_size=12)
+    plotter.add_text("Deformation Animation", font_size=12)
 
-    # Define sphere marker for the finger position, and add it to the mesh
-    finger_marker = pv.Sphere(radius=R, center=finger_position)
+    # Add the mesh
+    actor = plotter.add_mesh(grid, show_edges=True, colormap="coolwarm")
+
+    # Add the finger marker as a sphere
+    finger_marker = pv.Sphere(radius=0.003, center=finger_position)
     plotter.add_mesh(finger_marker, color="green", label="Finger Position", opacity=1.0)
 
-    # Add mesh to the plotter
-    actor = plotter.add_mesh(grid, show_edges=True, scalars="Displacement", colormap="coolwarm")
-    plotter.show_grid()
-
     # Open movie file for writing
-    plotter.open_movie(ANIMATION_FILE, framerate=ANIMATION_FRAMERATE)
+    plotter.open_movie(output_file, framerate=20)
 
-    for step in range(num_steps):
-        # Update points with displacement
-        grid.points = points + displacements[step]
+    deformation_keys = sorted(deformations.keys(), key=lambda x: float(x))
 
-        # Update scalar values (displacement norms) for coloring
-        displacement_norms = np.linalg.norm(displacements[step], axis=1)
-        grid.point_data["Displacement"] = displacement_norms
+    # Animate through all time steps
+    for time_step in deformation_keys:
+        displacement = deformations[time_step]
+        grid.points = points + displacement
 
-        # Update the scene and write frame
+        # Write frame
         plotter.write_frame()
 
         # (Optional) Print progress
-        if step % 10 == 0:
-            print(f"Rendered time step {step}/{num_steps}")
+        print(f"Rendered time step {time_step}")
 
-    # Close movie and show
+    # Close the plotter
     plotter.close()
 
 
-# Load mesh and displacement data
-domain = load_mesh(mesh_file)
-displacement_data = load_displacement_data(displacement_file)
-finger_position = get_finger_position(INDEX)
+if __name__ == "__main__":
+    # Set up argument parsing
+    parser = argparse.ArgumentParser(description="Animate mesh deformation.")
+    parser.add_argument("--xdmf_file", required=True, help="Path to the XDMF file.")
+    parser.add_argument("--h5_file", required=True, help="Path to the HDF5 file.")
+    parser.add_argument("--output", required=True, help="Path to save the animation.")
+    parser.add_argument("--finger_position", type=float, nargs=3, required=True, help="Finger position as x, y, z.")
+    parser.add_argument("--offscreen", action="store_true", help="Enable offscreen rendering.")
+    args = parser.parse_args()
 
-# Animate displacement
-animate_displacement(domain, displacement_data, finger_position, args.offscreen)
+    # Load mesh and deformations
+    points, connectivity, deformations = load_mesh_and_deformations(args.xdmf_file, args.h5_file)
 
+    print(f"Loaded mesh points: {points.shape}")
+    print(f"Loaded connectivity: {connectivity.shape}")
+    print(f"Loaded {len(deformations)} deformation time steps.")
+
+    # Animate deformation
+    animate_deformation(points, connectivity, deformations, np.array(args.finger_position), args.output, args.offscreen)

@@ -159,13 +159,11 @@ class PhysicalDeformationSimulation:
         self.u_n = fem.Function(self.V)  # u_n
 
         self.u_tn = fem.Function(self.V)  # du/dt (n)
-        self.u_tn1 = fem.Function(self.V)  # du/dt (n+1)
 
         # set u_n, a_tn to 0
         # Initialize displacement and velocity to zero
         self.u_n.interpolate(lambda x: np.zeros_like(x))
         self.u_tn.interpolate(lambda x: np.zeros_like(x))
-        self.u_tn1.interpolate(lambda x: np.zeros_like(x))
 
     def set_time_param(self, t, T, dt, num_steps, dt_max):
         # Time parameters
@@ -190,6 +188,9 @@ class PhysicalDeformationSimulation:
         self.write_index = 0
 
         self.OUTPUT_FILE = OUTPUT_FILE
+        print(f"output file = {self.OUTPUT_FILE}")
+        self.xdmf = io.XDMFFile(self.domain.comm, OUTPUT_FILE, "w")
+        self.xdmf.write_mesh(self.domain)
 
     def calculate_constant_fem(self, pressure: float, R: float, rho: float):
         # Body force
@@ -228,12 +229,6 @@ class PhysicalDeformationSimulation:
             self.rho * ufl.inner(self.u_tn, self.v) * ufl.dx - self.dt * ufl.inner(self.sigma(self.u_n), self.epsilon(self.v)) * ufl.dx
         )
         L = self.L_CONSTANT + L_changing
-        # L = (
-        #     rho * ufl.inner(u_tn, v) * ufl.dx
-        #     + dt * ufl.inner(f, v) * ufl.dx
-        #     - dt * ufl.inner(sigma(u_n), epsilon(v)) * ufl.dx
-        #     + dt * traction_term
-        # )
 
         linear_form = fem.form(L)
         b = create_vector(linear_form)  # L(v)
@@ -244,58 +239,57 @@ class PhysicalDeformationSimulation:
         assemble_vector(b, linear_form)
 
         # Solve for velocity update (u_tn1)
-        self.solver.solve(b, self.u_tn1.x.petsc_vec)
-        self.u_tn1.x.scatter_forward()
+        self.solver.solve(b, self.u_tn.x.petsc_vec)
+        self.u_tn.x.scatter_forward()
 
         # Update displacement
-        self.u_n.x.array[:] += self.dt * self.u_tn1.x.array
+        self.u_n.x.array[:] += self.dt * self.u_tn.x.array
         # Reshape the displacement array to match the (num_points, 3) structure
 
-        # Update velocity for the next time step
-        self.u_tn.x.array[:] = self.u_tn1.x.array
-
         displacements = self.u_n.x.array.reshape(self.domain.geometry.x.shape)
-
-        # Print displacement information for debugging
-        displacement_norms = np.linalg.norm(displacements, axis=1)
-        max_norm = np.max(displacement_norms)
-        max_index = np.argmax(displacement_norms)
-        point_with_max_displacement = self.domain.geometry.x[max_index]
-        self.max_displacement_array[step] = max_norm
-        if max_norm > 1000:
-            print("The maximal norm of the displacement was way too big, exiting")
-            print(f"max_norm = {max_norm}")
-            exit(1)
-
-        if self.write_index >= self.NUMBER_OF_WRITES:
-            print(f"Warning: write_index ({self.write_index}) exceeds NUMBER_OF_WRITES ({self.NUMBER_OF_WRITES})!")
-            return 2
-
-        if step == self.num_steps - 1 or (step % self.NUMBER_OF_STEPS_BETWEEN_WRITES) == 0:
-            print("-----------------------------------------------")
-            print(f"Time step {step+1}/{self.num_steps}, t = {self.t}")
-
-            print(f"displacements = \n{displacements}\n")
-            print(f"Maximum displacement norm: {max_norm}")
-            print(f"Point with maximum displacement: {point_with_max_displacement}")
-
-            ##### This doesnt work for now
-            # print(f"Point of finger pressure:        {finger_position}")
-            # print(f"Point of finger (inside):        {finger_inside_object}")
-            # finger_displacement = get_function_value_at_point(domain, u_n, delaunay, finger_inside_object, cells, estimate_avg_cell_size)
-            # print(f"Finger displacement  = {finger_displacement}")
-
-            self.write_index += 1
-
-            print("\n-----------------------------------------------")
-            return 0
+        self.xdmf.write_function(self.u_n, self.t)
+        return displacements
 
     def simulate(self):
+        self.xdmf.write_function(self.u_n, self.t)
         for step in range(self.num_steps):
-            ret = self.simulate_one_itteration(step)
-            if ret != 0:
-                break
-        return ret
+            displacements = self.simulate_one_itteration(step)
+
+            # Print displacement information for debugging
+            displacement_norms = np.linalg.norm(displacements, axis=1)
+            max_norm = np.max(displacement_norms)
+            max_index = np.argmax(displacement_norms)
+            point_with_max_displacement = self.domain.geometry.x[max_index]
+            self.max_displacement_array[step] = max_norm
+
+            if max_norm > 1000:
+                print("The maximal norm of the displacement was way too big, exiting")
+                print(f"max_norm = {max_norm}")
+                return 1
+
+            if self.write_index >= self.NUMBER_OF_WRITES:
+                print(f"Warning: write_index ({self.write_index}) exceeds NUMBER_OF_WRITES ({self.NUMBER_OF_WRITES})!")
+                return 2
+
+            if step == self.num_steps - 1 or (step % self.NUMBER_OF_STEPS_BETWEEN_WRITES) == 0:
+                print("-----------------------------------------------")
+                print(f"Time step {step+1}/{self.num_steps}, t = {self.t}")
+
+                print(f"displacements = \n{displacements}\n")
+                print(f"Maximum displacement norm: {max_norm}")
+                print(f"Point with maximum displacement: {point_with_max_displacement}")
+
+                ##### This doesnt work for now
+                # print(f"Point of finger pressure:        {finger_position}")
+                # print(f"Point of finger (inside):        {finger_inside_object}")
+                # finger_displacement = get_function_value_at_point(domain, u_n, delaunay, finger_inside_object, cells, estimate_avg_cell_size)
+                # print(f"Finger displacement  = {finger_displacement}")
+
+                self.write_index += 1
+                print("\n-----------------------------------------------")
+
+        self.xdmf.close()
+        return 0
 
     def write_max_norms(self, DISPLACEMENT_NORMS_DIR):
         print("\n\n-----End of Simulation-----\n\n")  # Close the movie file
@@ -332,7 +326,7 @@ def main(index: int, finger_position: np.ndarray, OUTPUT_FILE: str, DISPLACEMENT
 
     # Time parameters
     t = 0.0
-    T = 0.01  # Total simulation time
+    T = 0.0001  # Total simulation time
     dt = 1e-6
     num_steps = int(T / dt + 1)
     dt_max = compute_estimate_dt_courant_limit(points, connectivity, E, rho, nu)
@@ -373,10 +367,10 @@ def main(index: int, finger_position: np.ndarray, OUTPUT_FILE: str, DISPLACEMENT
     NUMBER_OF_STEPS_BETWEEN_WRITES: int = 1
     bunny_simulation.set_write_param(NUMBER_OF_STEPS_BETWEEN_WRITES, OUTPUT_FILE)
     bunny_simulation.calculate_constant_fem(pressure, R, rho)
-    bunny_simulation.simulate()
+    main_ret = bunny_simulation.simulate()
     bunny_simulation.write_max_norms(DISPLACEMENT_NORMS_DIR)
 
-    return 0
+    return main_ret
 
 
 if __name__ == "__main__":
@@ -408,12 +402,17 @@ if __name__ == "__main__":
     # output_directory = "deformed_bunny_files"
     OUTPUT_DIRECTORY = "./deformed_bunny_files_tunned"
     os.makedirs(OUTPUT_DIRECTORY, exist_ok=True)
-    OUTPUT_FILE = f"{OUTPUT_DIRECTORY}/displacement_{index}.h5"
+    OUTPUT_FILE = f"{OUTPUT_DIRECTORY}/displacement_{index}.xdmf"
+    OUTPUT_FILE_H5 = f"{OUTPUT_DIRECTORY}/displacement_{index}.h5"
 
     # File handling
     if os.path.exists(OUTPUT_FILE):
         print(f"File {OUTPUT_FILE} already exists. Removing it.")
         os.remove(OUTPUT_FILE)
+    # File handling
+    if os.path.exists(OUTPUT_FILE_H5):
+        print(f"File {OUTPUT_FILE_H5} already exists. Removing it.")
+        os.remove(OUTPUT_FILE_H5)
 
     ret = main(index, finger_position, OUTPUT_FILE, DISPLACEMENT_NORMS_DIR)
     exit(ret)
