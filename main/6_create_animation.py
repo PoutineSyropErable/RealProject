@@ -7,6 +7,7 @@ from mpi4py import MPI
 from typing import Tuple
 import argparse
 import os, sys
+from scipy.spatial import distance
 
 # Ensure the working directory is correct
 os.chdir(sys.path[0])
@@ -88,22 +89,6 @@ def load_deformations(h5_file: str) -> Tuple[np.ndarray, np.ndarray]:
     return time_steps, displacements
 
 
-def get_finger_position(index: int) -> np.ndarray:
-    """
-    Retrieve the finger position based on the given index.
-
-    Parameters:
-        index (int): The index for the deformation scenario.
-
-    Returns:
-        np.ndarray: The finger position as a NumPy array.
-    """
-    FILTERED_POINTS_FILE = "./filtered_points_of_force_on_boundary.txt"
-    filtered_points = np.loadtxt(FILTERED_POINTS_FILE, skiprows=1)
-    finger_position = filtered_points[index]
-    return finger_position
-
-
 def load_mesh_and_deformations(xdmf_file: str, h5_file: str):
     """
     Load mesh points and deformation data.
@@ -122,6 +107,140 @@ def load_mesh_and_deformations(xdmf_file: str, h5_file: str):
     time_steps, deformations = load_deformations(h5_file)
 
     return points, connectivity, time_steps, deformations
+
+
+def get_finger_position(index: int) -> np.ndarray:
+    """
+    Retrieve the finger position based on the given index.
+
+    Parameters:
+        index (int): The index for the deformation scenario.
+
+    Returns:
+        np.ndarray: The finger position as a NumPy array.
+    """
+    FILTERED_POINTS_FILE = "./filtered_points_of_force_on_boundary.txt"
+    filtered_points = np.loadtxt(FILTERED_POINTS_FILE, skiprows=1)
+    finger_position = filtered_points[index]
+    return finger_position
+
+
+import numpy as np
+
+
+def compute_barycentric_coordinates(point, vertices):
+    """
+    Compute the barycentric coordinates of a point with respect to a tetrahedron.
+
+    Parameters:
+        point (np.ndarray): The target point (shape: (3,)).
+        vertices (np.ndarray): The vertices of the tetrahedron (shape: (4, 3)).
+
+    Returns:
+        np.ndarray: The barycentric coordinates (shape: (4,)).
+    """
+    if vertices.shape != (4, 3):
+        raise ValueError(f"Expected vertices shape (4, 3), but got {vertices.shape}")
+
+    T = np.hstack([vertices.T, np.ones((4, 1))])  # Add 1s for affine coordinates
+    T_inv = np.linalg.inv(T)
+    coords = T_inv @ np.append(point, 1)
+    return coords
+
+
+def is_point_in_tetrahedron(bary_coords):
+    """
+    Check if a point is inside a tetrahedron based on barycentric coordinates.
+
+    Parameters:
+        bary_coords (np.ndarray): The barycentric coordinates of the point.
+
+    Returns:
+        bool: True if the point is inside the tetrahedron, False otherwise.
+    """
+    return np.all(bary_coords >= 0) and np.all(bary_coords <= 1)
+
+
+def get_closest_points(target_point, points, k=10):
+    """
+    Find the indices of the k closest points to the target point.
+
+    Parameters:
+        target_point (np.ndarray): The point to compare against (shape: (3,)).
+        points (np.ndarray): The mesh points (shape: (n_points, 3)).
+        k (int): Number of closest points to find.
+
+    Returns:
+        np.ndarray: Indices of the k closest points.
+    """
+    distances = np.linalg.norm(points - target_point, axis=1)
+    return np.argsort(distances)[:k]
+
+
+def find_cell_and_barycentric(points, connectivity, target_point):
+    """
+    Find the cell containing the point or the closest cell and compute barycentric coordinates.
+
+    Parameters:
+        points (np.ndarray): The mesh points (shape: (n_points, 3)).
+        connectivity (np.ndarray): The cell connectivity (shape: (n_cells, 4)).
+        target_point (np.ndarray): The target point (shape: (3,)).
+
+    Returns:
+        tuple: The cell index, barycentric coordinates, and fallback status (bool).
+    """
+    for cell_index, cell in enumerate(connectivity):
+        if len(cell) != 4:
+            raise ValueError(f"Cell at index {cell_index} does not have 4 vertices: {cell}")
+
+        vertices = points[cell]
+        if vertices.shape != (4, 3):
+            raise ValueError(f"Unexpected vertices shape {vertices.shape} for cell {cell_index}")
+
+        bary_coords = compute_barycentric_coordinates(target_point, vertices)
+        if is_point_in_tetrahedron(bary_coords):
+            return cell_index, bary_coords, False  # Found cell, no fallback
+
+    # Fallback: Use closest points to find the closest cell
+    closest_points_indices = get_closest_points(target_point, points)
+    candidate_cells = [cell_index for cell_index, cell in enumerate(connectivity) if np.any(np.isin(cell, closest_points_indices))]
+
+    if not candidate_cells:
+        raise RuntimeError("No candidate cells found near the finger position.")
+
+    # Pick the first candidate cell for simplicity
+    fallback_cell_index = candidate_cells[0]
+    vertices = points[connectivity[fallback_cell_index]]
+    bary_coords = compute_barycentric_coordinates(target_point, vertices)
+
+    return fallback_cell_index, bary_coords, True
+
+
+def get_finger_info(finger_position, points, connectivity):
+    """
+    Get the cell and barycentric coordinates for the finger position.
+
+    Parameters:
+        finger_position (np.ndarray): The finger position (shape: (3,)).
+        points (np.ndarray): The mesh points (shape: (n_points, 3)).
+        connectivity (np.ndarray): The cell connectivity (shape: (n_cells, 4)).
+
+    Returns:
+        dict: Information about the finger including cell index, barycentric coordinates,
+              and whether the result is from fallback logic.
+    """
+    if points.ndim != 2 or points.shape[1] != 3:
+        raise ValueError(f"Expected points shape (n_points, 3), but got {points.shape}")
+
+    if connectivity.ndim != 2 or connectivity.shape[1] != 4:
+        raise ValueError(f"Expected connectivity shape (n_cells, 4), but got {connectivity.shape}")
+
+    cell_index, bary_coords, fallback = find_cell_and_barycentric(points, connectivity, finger_position)
+    return {
+        "cell_index": cell_index,
+        "barycentric_coordinates": bary_coords,
+        "fallback": fallback,
+    }
 
 
 def animate_deformation(
@@ -186,6 +305,46 @@ def animate_deformation(
     plotter.close()
 
 
+def main(INDEX: int, OFFSCREEN: bool):
+    # Fixed XDMF file
+    XDMF_FILE = "bunny.xdmf"
+
+    # Construct HDF5 file path based on index
+    H5_FILE = f"./deformed_bunny_files_tunned/displacement_{INDEX}.h5"
+    OUTPUT_DIR = f"./Animations_tunned"
+    OUTPUT_FILE = f"{OUTPUT_DIR}/deformation_{INDEX}.mp4"
+
+    # Ensure output directory exists
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    # Load mesh and deformations
+    points, connectivity, time_steps, deformations = load_mesh_and_deformations(XDMF_FILE, H5_FILE)
+
+    print(f"Loaded mesh points: {points.shape}")
+    print(f"Loaded connectivity: {connectivity.shape}")
+    print(f"Loaded {len(time_steps)} deformation time steps.")
+
+    if connectivity.shape[1] != 4:
+        raise ValueError(
+            f"Expected connectivity to define tetrahedral cells with 4 vertices, " f"but found {connectivity.shape[1]} vertices per cell."
+        )
+
+    # Get finger position
+    print("\n\n")
+    finger_position = get_finger_position(INDEX)
+    finger_info = get_finger_info(finger_position, points, connectivity)
+
+    print(f"Finger position info: {finger_info}")
+    if not finger_info["fallback"]:
+        print("The finger is inside a cell.")
+    else:
+        print("The finger is outside the mesh. Using the closest cell as fallback.")
+        print("\n\n")
+
+    # Animate deformation
+    animate_deformation(points, connectivity, deformations, finger_position, OUTPUT_FILE, OFFSCREEN)
+
+
 if __name__ == "__main__":
     # Set up argument parsing
     parser = argparse.ArgumentParser(description="Create animation from deformation data.")
@@ -202,26 +361,4 @@ if __name__ == "__main__":
     else:
         parser.error("Index must be provided either as '--index' or as a positional argument.")
 
-    # Fixed XDMF file
-    XDMF_FILE = "bunny.xdmf"
-
-    # Construct HDF5 file path based on index
-    H5_FILE = f"./deformed_bunny_files_tunned/displacement_{INDEX}.h5"
-    OUTPUT_DIR = f"./Animations_tunned"
-    OUTPUT_FILE = f"{OUTPUT_DIR}/deformation_{INDEX}.mp4"
-
-    # Ensure output directory exists
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    # Load mesh and deformations
-    points, connectivity, time_steps, deformations = load_mesh_and_deformations(XDMF_FILE, H5_FILE)
-
-    # Get finger position
-    finger_position = get_finger_position(INDEX)
-
-    print(f"Loaded mesh points: {points.shape}")
-    print(f"Loaded connectivity: {connectivity.shape}")
-    print(f"Loaded {len(time_steps)} deformation time steps.")
-
-    # Animate deformation
-    animate_deformation(points, connectivity, deformations, finger_position, OUTPUT_FILE, args.offscreen)
+    main(INDEX, args.offscreen)
