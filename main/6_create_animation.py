@@ -146,6 +146,9 @@ def animate_deformation(
     cell_types = np.full(num_cells, 10, dtype=np.uint8)  # 10 corresponds to tetrahedrons in PyVista
     grid = pv.UnstructuredGrid(cells, cell_types, points)
 
+    displacement_norms = np.linalg.norm(deformations[0], axis=1)
+    grid.point_data["Displacement"] = displacement_norms
+
     # Setup PyVista plotter
     plotter = pv.Plotter(off_screen=offscreen)
     plotter.add_axes()
@@ -153,6 +156,7 @@ def animate_deformation(
 
     # Add the mesh
     actor = plotter.add_mesh(grid, show_edges=True, colormap="coolwarm")
+    plotter.show_grid()
 
     # Add the finger marker as a sphere
     finger_marker = pv.Sphere(radius=R, center=finger_position)
@@ -165,12 +169,18 @@ def animate_deformation(
     for t_index in range(deformations.shape[0]):
         displacement = deformations[t_index]
         grid.points = points + displacement
+        # Update scalar values (displacement norms) for coloring
+        displacement_norms = np.linalg.norm(deformations[t_index], axis=1)
+        grid.point_data["Displacement"] = displacement_norms
+        # Update the actor to reflect new scalar values
+        actor.mapper.scalar_range = (np.min(displacement_norms), np.max(displacement_norms))
+        actor.mapper.update()
 
         # Write frame
         plotter.write_frame()
 
         # (Optional) Print progress
-        print(f"Rendered time step {t_index + 1}/{deformations.shape[0]}")
+        # print(f"Rendered time step {t_index + 1}/{deformations.shape[0]}")
 
     # Close the plotter
     plotter.close()
