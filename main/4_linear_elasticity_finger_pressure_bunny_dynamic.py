@@ -225,9 +225,15 @@ class PhysicalDeformationSimulation:
 
         # Linear form
         L_changing = (
-            self.rho * ufl.inner(self.u_tn, self.v) * ufl.dx - self.dt * ufl.inner(self.sigma(self.u_n) + self.epsilon(self.v)) * ufl.dx
+            self.rho * ufl.inner(self.u_tn, self.v) * ufl.dx - self.dt * ufl.inner(self.sigma(self.u_n), self.epsilon(self.v)) * ufl.dx
         )
         L = self.L_CONSTANT + L_changing
+        # L = (
+        #     rho * ufl.inner(u_tn, v) * ufl.dx
+        #     + dt * ufl.inner(f, v) * ufl.dx
+        #     - dt * ufl.inner(sigma(u_n), epsilon(v)) * ufl.dx
+        #     + dt * traction_term
+        # )
 
         linear_form = fem.form(L)
         b = create_vector(linear_form)  # L(v)
