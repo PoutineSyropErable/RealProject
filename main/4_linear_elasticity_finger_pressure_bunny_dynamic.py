@@ -21,7 +21,7 @@ import os, sys
 import argparse
 from typing import Tuple
 
-DEBUG_ = True
+DEBUG_ = False
 # --------------------------------------------------------HELPER FUNCTIONS-----------------------------------------
 
 
@@ -148,10 +148,9 @@ class PhysicalDeformationSimulation:
         tdim = domain.topology.dim  # 3D
         fdim = tdim - 1  # 2D
         boundary_facets = mesh.locate_entities_boundary(domain, fdim, static_on_boundary_function)
+        boundary_dofs = fem.locate_dofs_topological(self.V, fdim, boundary_facets)
         u_D = np.array([0, 0, 0], dtype=default_scalar_type)  # no displacement on boundary
-        self.bc = fem.dirichletbc(
-            u_D, fem.locate_dofs_topological(self.V, fdim, boundary_facets), self.V
-        )  # create a condition where u = 0 on z = 0
+        self.bc = fem.dirichletbc(u_D, boundary_dofs, self.V)  # create a condition where u = 0 on z = 0
 
         self.v = ufl.TestFunction(self.V)
         self.u_t = ufl.TrialFunction(self.V)
@@ -192,20 +191,10 @@ class PhysicalDeformationSimulation:
         self.xdmf = io.XDMFFile(self.domain.comm, OUTPUT_FILE, "w")
         self.xdmf.write_mesh(self.domain)
 
-    def calculate_constant_fem(self, pressure: float, R: float, rho: float):
+    def calculate_constant_fem(self, rho: float):
         # Body force
         self.f = fem.Constant(self.domain, PETSc.ScalarType((0, 0, 0)))
         self.rho = rho
-
-        p = fem.Constant(self.domain, PETSc.ScalarType(-pressure))  # Negative for compression
-
-        # Get the point on the boundary who will be under pressure. (Near the "Finger")
-        x = ufl.SpatialCoordinate(self.domain)
-        distance = ufl.sqrt((x[0] - finger_position[0]) ** 2 + (x[1] - finger_position[1]) ** 2 + (x[2] - finger_position[2]) ** 2)
-        is_under_pressure = ufl.conditional(ufl.lt(distance, R), 1.0, 0.0)  # If touching finger
-
-        # Traction term
-        self.traction_term = is_under_pressure * p * ufl.dot(self.v, ufl.FacetNormal(self.domain)) * ufl.ds
 
         # Create the solver
         self.solver = PETSc.KSP().create(self.domain.comm)
@@ -219,6 +208,18 @@ class PhysicalDeformationSimulation:
         A.assemble()
         self.solver.setOperators(A)
 
+    def set_finger_position(self, finger_position: np.ndarray, R: float, pressure: float):
+        self.finger_position = finger_position
+        self.R = R
+        p = fem.Constant(self.domain, PETSc.ScalarType(-pressure))  # Negative for compression
+
+        # Get the point on the boundary who will be under pressure. (Near the "Finger")
+        x = ufl.SpatialCoordinate(self.domain)
+        distance = ufl.sqrt((x[0] - finger_position[0]) ** 2 + (x[1] - finger_position[1]) ** 2 + (x[2] - finger_position[2]) ** 2)
+        is_under_pressure = ufl.conditional(ufl.lt(distance, R), 1.0, 0.0)  # If touching finger
+
+        # Traction term
+        self.traction_term = is_under_pressure * p * ufl.dot(self.v, ufl.FacetNormal(self.domain)) * ufl.ds
         self.L_CONSTANT = self.dt * ufl.inner(self.f, self.v) * ufl.dx + self.dt * self.traction_term
 
     def simulate_one_itteration(self, step):
@@ -247,7 +248,6 @@ class PhysicalDeformationSimulation:
         # Reshape the displacement array to match the (num_points, 3) structure
 
         displacements = self.u_n.x.array.reshape(self.domain.geometry.x.shape)
-        self.xdmf.write_function(self.u_n, self.t)
         return displacements
 
     def simulate(self):
@@ -275,7 +275,8 @@ class PhysicalDeformationSimulation:
                 print("-----------------------------------------------")
                 print(f"Time step {step+1}/{self.num_steps}, t = {self.t}")
 
-                print(f"displacements = \n{displacements}\n")
+                self.xdmf.write_function(self.u_n, self.t)
+                print(f"displacements[0:5] = \n{displacements[0:5]}\n")
                 print(f"Maximum displacement norm: {max_norm}")
                 print(f"Point with maximum displacement: {point_with_max_displacement}")
 
@@ -326,7 +327,7 @@ def main(index: int, finger_position: np.ndarray, OUTPUT_FILE: str, DISPLACEMENT
 
     # Time parameters
     t = 0.0
-    T = 0.0001  # Total simulation time
+    T = 0.01  # Total simulation time
     dt = 1e-6
     num_steps = int(T / dt + 1)
     dt_max = compute_estimate_dt_courant_limit(points, connectivity, E, rho, nu)
@@ -364,9 +365,10 @@ def main(index: int, finger_position: np.ndarray, OUTPUT_FILE: str, DISPLACEMENT
     bunny_simulation = PhysicalDeformationSimulation(domain, grounded_bunny, epsilon, sigma)
     bunny_simulation.set_time_param(t, T, dt, num_steps, dt_max)
 
-    NUMBER_OF_STEPS_BETWEEN_WRITES: int = 1
+    NUMBER_OF_STEPS_BETWEEN_WRITES: int = 100
     bunny_simulation.set_write_param(NUMBER_OF_STEPS_BETWEEN_WRITES, OUTPUT_FILE)
-    bunny_simulation.calculate_constant_fem(pressure, R, rho)
+    bunny_simulation.calculate_constant_fem(rho)
+    bunny_simulation.set_finger_position(finger_position, R, pressure)
     main_ret = bunny_simulation.simulate()
     bunny_simulation.write_max_norms(DISPLACEMENT_NORMS_DIR)
 
