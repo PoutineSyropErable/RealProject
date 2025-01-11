@@ -332,14 +332,15 @@ def main(INDEX: int, OFFSCREEN: bool):
     # Get finger position
     print("\n\n")
     finger_position = get_finger_position(INDEX)
-    finger_info = get_finger_info(finger_position, points, connectivity)
+    if False:
+        finger_info = get_finger_info(finger_position, points, connectivity)
 
-    print(f"Finger position info: {finger_info}")
-    if not finger_info["fallback"]:
-        print("The finger is inside a cell.")
-    else:
-        print("The finger is outside the mesh. Using the closest cell as fallback.")
-        print("\n\n")
+        print(f"Finger position info: {finger_info}")
+        if not finger_info["fallback"]:
+            print("The finger is inside a cell.")
+        else:
+            print("The finger is outside the mesh. Using the closest cell as fallback.")
+            print("\n\n")
 
     # Animate deformation
     animate_deformation(points, connectivity, deformations, finger_position, OUTPUT_FILE, OFFSCREEN)
