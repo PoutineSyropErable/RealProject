@@ -3,6 +3,8 @@ import signal
 import time
 import copy
 import sys
+import argparse
+import pickle
 
 # Change to the script's directory
 os.chdir(sys.path[0])
@@ -13,8 +15,8 @@ FILENAME = "model"
 
 # Global variables to track the current state
 epoch = 0
-weights = 0
-weights_previous = 0
+weights: float = 0.0
+weights_previous: float = 0.0
 stop_requested = False  # Tracks if a custom signal is received
 
 # Ensure the results directory exists
@@ -22,14 +24,36 @@ os.makedirs(RESULT_DIR, exist_ok=True)
 
 
 def save_state(filename, epoch, weights):
-    """Save the current state to a file."""
+    """Save the current state to both .txt and .pickle files."""
     print(f"\nSaving state to {filename}...")
     if epoch == 0:
         print("No previous state to save.")
         return
-    with open(filename, "w") as file:
-        file.write(f"Epoch: {epoch}\nWeights: {weights}\n")
-    print(f"State saved successfully to {filename}!")
+
+    # Save as text file
+    text_file = f"{filename}.txt"
+    with open(text_file, "w") as tf:
+        tf.write(f"Epoch: {epoch}\nWeights: {weights}\n")
+
+    # Save as pickle file
+    pickle_file = f"{filename}.pickle"
+    with open(pickle_file, "wb") as pf:
+        pickle.dump((epoch, weights), pf)
+
+    print(f"State saved successfully to {text_file} and {pickle_file}!")
+
+
+def load_state(filename):
+    """Load the state from a pickle file."""
+    pickle_file = f"{filename}.pickle"
+    try:
+        with open(pickle_file, "rb") as pf:
+            epoch, weights = pickle.load(pf)
+            print(f"Loaded state from {pickle_file}: Epoch: {epoch}, Weights: {weights}")
+            return epoch, weights
+    except FileNotFoundError:
+        print(f"Error: {pickle_file} not found.")
+        return None, None
 
 
 def handle_kill_signal(signum, frame):
@@ -71,7 +95,22 @@ def simulate_execution(epoch):
     return total
 
 
-def main():
+def get_max_epoch(state_type=None):
+    """Get the maximum epoch from the saved files."""
+    try:
+        files = os.listdir(RESULT_DIR)
+        if state_type:
+            files = [f for f in files if f.endswith(f"_{state_type}.pickle")]
+        if not files:
+            return None
+        epochs = [int(f.split("_")[1]) for f in files if f.startswith(FILENAME)]
+        return max(epochs)
+    except Exception as e:
+        print(f"Error while retrieving epochs: {e}")
+        return None
+
+
+def main(continue_run=False, state_type=None, epoch_override=None):
     """Main program logic."""
     global epoch, weights, weights_previous, stop_requested
 
@@ -81,16 +120,35 @@ def main():
     signal.signal(signal.SIGUSR2, handle_custom_signal)  # Custom stop signal
     signal.signal(signal.SIGINT, handle_term_signal)  # Keyboard interrupt treated as terminate
 
-    print("Starting main loop...")
+    if continue_run:
+        print("Continuing from a saved state...")
+
+        if epoch_override is not None:
+            epoch = epoch_override
+        else:
+            epoch = get_max_epoch(state_type)
+
+        if epoch is None:
+            print(f"No saved state found to continue from.")
+            return 1
+
+        # Load weights from the saved state
+        filename = f"{RESULT_DIR}/{FILENAME}_{epoch}_{state_type or 'stop'}"
+        epoch, weights = load_state(filename)
+        if epoch is None:
+            print(f"Failed to load state from {filename}.")
+            return 1
+
+        print(f"Resuming from epoch {epoch} ({'all states' if state_type is None else state_type}).")
+    else:
+        print("Starting fresh training run...")
 
     while epoch < 100:
-        # Simulate code execution
         print(f"Simulating epoch {epoch}...")
         weights_previous = copy.deepcopy(weights)
         weights = simulate_execution(epoch)
         epoch += 1
 
-        # Handle custom signal to stop gracefully
         if stop_requested:
             filename = f"{RESULT_DIR}/{FILENAME}_{epoch}_stop"
             save_state(filename, epoch, weights)
@@ -105,5 +163,38 @@ def main():
 
 
 if __name__ == "__main__":
-    ret = main()
-    exit(ret)
+    parser = argparse.ArgumentParser(description="Machine Learning Simulation Script")
+    parser.add_argument(
+        "--continue_run",
+        action="store_true",
+        help="Continue training from a saved state.",
+    )
+    parser.add_argument(
+        "--terminate",
+        action="store_true",
+        help="Resume training from a terminate state.",
+    )
+    parser.add_argument(
+        "--stop",
+        action="store_true",
+        help="Resume training from a stop state.",
+    )
+    parser.add_argument(
+        "--epoch",
+        type=int,
+        default=None,
+        help="Specify the epoch to start from if continuing.",
+    )
+    args = parser.parse_args()
+
+    # Validation
+    if not args.continue_run and (args.stop or args.terminate or args.epoch is not None):
+        print("Error: --continue_run is needed for --stop, --terminate and --epoch")
+        sys.exit(1)
+    if args.terminate and args.stop:
+        print("Error: Cannot specify both --terminate and --stop.")
+        sys.exit(1)
+
+    state_type = "terminate" if args.terminate else "stop" if args.stop else None
+    ret = main(continue_run=args.continue_run, state_type=state_type, epoch_override=args.epoch)
+    sys.exit(ret)
