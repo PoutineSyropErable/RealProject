@@ -11,6 +11,7 @@ import argparse
 import os, sys
 import time
 import matplotlib.pyplot as plt
+import polyscope as ps
 
 DEBUG_ = False
 DEBUG_TIMER = True
@@ -23,8 +24,11 @@ DISPLACMENT_DIR = "./deformed_bunny_files_tunned"
 OUTPUT_DIR = "./calculated_sdf_tunned"
 
 
-Z_EXPONENT = 0.5
-Z_OFFSET = 0.001
+Z_EXPONENT = 0.3
+Z_OFFSET = 0.01
+
+NUMBER_OF_POINTS_IN_VISUALISATION = 10_000
+START_INDEX = 0
 
 
 def load_file(filename: str) -> mesh.Mesh:
@@ -200,7 +204,14 @@ def get_surface_mesh(points: np.ndarray, connectivity: np.ndarray):
     return vertices, faces
 
 
-def compute_bounding_box(mesh_points: np.ndarray):
+def compute_small_bounding_box(mesh_points: np.ndarray) -> (np.ndarray, np.ndarray):
+    """Compute the smallest bounding box for the vertices."""
+    b_min = np.min(mesh_points, axis=0)
+    b_max = np.max(mesh_points, axis=0)
+    return b_min, b_max
+
+
+def compute_enlarged_bounding_box(mesh_points: np.ndarray):
     """Compute the bounding box for the vertices."""
     b_min = mesh_points.min(axis=0)
     b_max = mesh_points.max(axis=0)
@@ -227,10 +238,38 @@ class DistributionFunction:
         self.num_precompute = num_precompute
         self.delta_u = 1 / (self.num_precompute - 1)
         self.a = self._calculate_normalization_constant()
+        # print(f"a = {self.a}")
+        self.validate_range()
         self._precompute_inverse_cdf()
 
+    def validate_range(self):
+        # Precompute CDF values at z_min and z_max
+        self.cdf_at_z_min = self.cdf(self.z_min)
+        self.cdf_at_z_max = self.cdf(self.z_max)
+
+        # Compute cdf_minus_u range
+        self.f_a_range = [self.cdf_at_z_min - 1, self.cdf_at_z_min - 0]
+        self.f_b_range = [self.cdf_at_z_max - 1, self.cdf_at_z_max - 0]
+
+        # print(f"f_a_range = {self.f_a_range}")
+        # print(f"f_b_range = {self.f_b_range}")
+        # print("")
+        # Validate ranges
+        if max(self.f_a_range) * min(self.f_b_range) > 0:
+            raise ValueError(
+                f"Invalid range: CDF ranges at z_min and z_max lead to f(a) * f(b) > 0.\n"
+                f"f(a) range: {self.f_a_range}\n"
+                f"f(b) range: {self.f_b_range}"
+            )
+
     def __str__(self):
-        return f"z_min = {self.z_min}\n" f"z_max = {self.z_max}\n" f"n = {self.n}\n" f"b = {self.b}\n" f"a = {self.a}"
+        return (
+            f"\t\t\tz_min = {self.z_min}\n"
+            f"\t\t\tz_max = {self.z_max}\n"
+            f"\t\t\tn = {self.n}\n"
+            f"\t\t\tb = {self.b}\n"
+            f"\t\t\ta = {self.a}"
+        )
 
     def _calculate_normalization_constant(self):
         """
@@ -275,7 +314,11 @@ class DistributionFunction:
         # Start with an initial guess at the lower bound
         z_calc = self.z_min
         for u in u_values:
-            z_calc = self._find_inverse_cdf(u, z_calc)  # Use previous z as the next initial guess
+            try:
+                z_calc = self._find_inverse_cdf(u, z_calc)  # Use previous z as the next initial guess
+            except ValueError as e:
+                print(f"\033[31mError in precomputing inverse CDF for u={u}: {e}\033[0m")
+                z_calc = self.z_min if u < 0.5 else self.z_max  # Fallback to bounds
             z_values.append(z_calc)
 
         self.precomputed_u = u_values
@@ -290,13 +333,31 @@ class DistributionFunction:
             z_init (float): Initial guess for z. If None, uses the middle of the range.
         """
 
+        # Handle edge cases
+        if u <= 0:
+            print(f"    z_min case: u = {u}")
+            return self.z_min
+        if u >= 1:
+            print(f"    z_max case: u = {u}")
+            return self.z_max
+
         def cdf_minus_u(z):
             return self.cdf(z) - u
 
-        # Use initial guess or default to the middle of the range
         x0 = z_init if z_init is not None else (self.z_min + self.z_max) / 2
+        # Validate bracket endpoints
 
-        solution = root_scalar(cdf_minus_u, bracket=[self.z_min, self.z_max], x0=x0, method="brentq")
+        # Slightly offset the brackets to avoid boundary issues
+        bracket = [self.z_min + 1e-10, self.z_max - 1e-10]
+        # Validate bracket endpoints
+        f_a = cdf_minus_u(bracket[0])
+        f_b = cdf_minus_u(bracket[1])
+        if f_a * f_b > 0:
+            raise ValueError(
+                f"Invalid bracket for u={u}: CDF(z_min)={f_a + u}, CDF(z_max)={f_b + u}. "
+                f"f(a)={f_a}, f(b)={f_b}. Brackets must have different signs."
+            )
+        solution = root_scalar(cdf_minus_u, bracket=bracket, x0=x0, method="brentq")
         return solution.root
 
     def _refine_inverse_cdf(self, u, z_guess):
@@ -417,9 +478,10 @@ def generate_sdf_points_from_boundary_points(NUM_POINTS, deformed_boundary_point
     """f = a*z^n + b
     a is calculated so int_min^max f dz = 1"""
 
-    b_min, b_max = compute_bounding_box(deformed_boundary_points_t)
+    b_min, b_max = compute_enlarged_bounding_box(deformed_boundary_points_t)
     z_min, z_max = b_min[2], b_max[2]
 
+    # print(f"z_min, z_max = {z_min}, {z_max}")
     print("    creating a point generator:")
     tuned_z_generator = DistributionFunction(n, b, z_min, z_max, NUM_PRECOMPUTED_CDF)
     print("        tuned_z_generator:")
@@ -517,9 +579,6 @@ def plot_histograms_with_function(point_list, b_min, b_max, n, b):
     z_values = np.linspace(z_min, z_max, 1000)
     f_values = distribution.pdf(z_values)
 
-    # Normalize f_values to match the histogram scale
-    f_values *= 1
-
     # Plot histograms
     fig, axes = plt.subplots(3, 1, figsize=(8, 12))
     data = [x, y, z]
@@ -527,6 +586,11 @@ def plot_histograms_with_function(point_list, b_min, b_max, n, b):
     bounds = [(b_min[0], b_max[0]), (b_min[1], b_max[1]), (z_min, z_max)]
 
     for i, ax in enumerate(axes):
+        # Calculate the histogram for scaling
+        hist, bin_edges = np.histogram(data[i], bins=50, range=bounds[i])
+        bin_width = bin_edges[1] - bin_edges[0]
+
+        # Plot the histogram
         ax.hist(data[i], bins=50, range=bounds[i], alpha=0.7, color="blue", label=f"Histogram of {labels[i]}")
         ax.set_title(f"{labels[i]} Histogram", fontsize=14)
         ax.set_xlabel(labels[i], fontsize=12)
@@ -534,7 +598,9 @@ def plot_histograms_with_function(point_list, b_min, b_max, n, b):
 
         # Overlay the function for z
         if labels[i] == "z":
-            ax.plot(z_values, f_values, color="red", label=r"$f(z) = a(z - z_{min})^n + b$", linewidth=2)
+            # Scale f_values to match histogram scale
+            f_values_scaled = f_values * len(z) * bin_width
+            ax.plot(z_values, f_values_scaled, color="red", label=r"$f(z) = a(z - z_{min})^n + b$", linewidth=2)
             ax.legend(fontsize=10)
 
         # Add bounds as vertical lines
@@ -544,6 +610,84 @@ def plot_histograms_with_function(point_list, b_min, b_max, n, b):
 
     plt.tight_layout()
     plt.show()
+
+
+def draw_bounding_box(b_min: np.ndarray, b_max: np.ndarray, name: str, color: tuple = (0.0, 1.0, 0.0), radius: float = 0.002):
+    """Draw a bounding box in Polyscope given min and max points."""
+    # Create corners of the bounding box
+    box_corners = np.array(
+        [
+            [b_min[0], b_min[1], b_min[2]],
+            [b_max[0], b_min[1], b_min[2]],
+            [b_max[0], b_max[1], b_min[2]],
+            [b_min[0], b_max[1], b_min[2]],
+            [b_min[0], b_min[1], b_max[2]],
+            [b_max[0], b_min[1], b_max[2]],
+            [b_max[0], b_max[1], b_max[2]],
+            [b_min[0], b_max[1], b_max[2]],
+        ]
+    )
+
+    # Define edges for the bounding box
+    box_edges = np.array(
+        [
+            [0, 1],
+            [1, 2],
+            [2, 3],
+            [3, 0],  # Bottom face
+            [4, 5],
+            [5, 6],
+            [6, 7],
+            [7, 4],  # Top face
+            [0, 4],
+            [1, 5],
+            [2, 6],
+            [3, 7],  # Vertical edges
+        ]
+    )
+
+    # Register the bounding box as a curve network
+    ps_bounding_box = ps.register_curve_network(name, box_corners, box_edges)
+    ps_bounding_box.set_radius(radius)
+    ps_bounding_box.set_color(color)
+
+
+def visualize_mesh_with_points(mesh_points, mesh_faces, sdf_points):
+    """
+    Visualize the mesh, bounding boxes, and SDF points in Polyscope.
+
+    Args:
+        mesh_points (np.ndarray): Vertices of the mesh.
+        mesh_faces (np.ndarray): Faces of the mesh (connectivity).
+        sdf_points (np.ndarray): Points where the SDF is computed.
+    """
+    # Make copies of the data and swap the y and z axes
+    temp_mesh_points = mesh_points.copy()
+    temp_mesh_points[:, [1, 2]] = temp_mesh_points[:, [2, 1]]  # Swap y and z axes
+
+    temp_sdf_points = sdf_points.copy()
+    temp_sdf_points[:, [1, 2]] = temp_sdf_points[:, [2, 1]]  # Swap y and z axes
+
+    # Compute bounding boxes with swapped axes
+    b_min, b_max = compute_enlarged_bounding_box(temp_mesh_points)
+    small_b_min, small_b_max = compute_small_bounding_box(temp_mesh_points)
+
+    # Initialize Polyscope
+    ps.init()
+
+    # Register the mesh
+    ps_mesh = ps.register_surface_mesh("Mesh", temp_mesh_points, mesh_faces)
+
+    # Register the SDF points
+    ps_sdf_points = ps.register_point_cloud("SDF Points", temp_sdf_points, radius=0.0025)
+    ps_sdf_points.set_color((1.0, 0.0, 0.0))  # Red for SDF points
+
+    # Draw bounding boxes
+    draw_bounding_box(b_min, b_max, "Large Bounding Box", color=(0.0, 1.0, 0.0), radius=0.002)
+    draw_bounding_box(small_b_min, small_b_max, "Small Bounding Box", color=(0.0, 0.0, 1.0), radius=0.001)
+
+    # Show Polyscope
+    ps.show()
 
 
 def main(INDEX, SDF_ONLY, REPLACE):
@@ -581,30 +725,34 @@ def main(INDEX, SDF_ONLY, REPLACE):
     def shape(t_index):
         return faces, deformed_boundary_points[t_index]
 
-    # show_mesh(*shape(0))
-    # animate_deformation(faces, deformed_boundary_points)
+    if DEBUG_:
+        # show_mesh(*shape(0))
+        # animate_deformation(faces, deformed_boundary_points)
+        pass
 
     # Extract bounding box from the undeformed mesh
 
     # Prepare to store SDF results
     print("Starting the loop")
     with h5py.File(OUTPUT_FILE, "w") as f:
-        for t_index in range(len(time_steps)):
+        # for t_index in range(3):
+        for t_index in range(START_INDEX, len(time_steps)):
             print(f"Processing time step {t_index}/{len(time_steps) -1}.")
             # Deform points using displacement
             # Compute signed distances
             # deformed_boundary_points[t_index] is the vertex of the surface mesh (.obj style) of the deformed bunny
             point_list = generate_sdf_points_from_boundary_points(NUM_POINTS, deformed_boundary_points[t_index], n=Z_EXPONENT, b=Z_OFFSET)
-            print(f"\ntype(point_list) = {type(point_list)}")
-            print(f"np.shape(point_list) = {np.shape(point_list)}")
-            print(f"point_list = \n{point_list}\n")
+            print(f"\n    type(point_list) = {type(point_list)}")
+            print(f"    np.shape(point_list) = {np.shape(point_list)}")
+            print(f"    point_list = \n{point_list}\n")
 
-            b_min, b_max = compute_bounding_box(deformed_boundary_points[t_index])
-            print(f"Bounding box:\nMin: {b_min}\nMax: {b_max}\n")
+            b_min, b_max = compute_enlarged_bounding_box(deformed_boundary_points[t_index])
+            print(f"    Bounding box:\n    Min: {b_min}\n    Max: {b_max}\n")
 
-            plot_histograms_with_function(point_list, b_min, b_max, Z_EXPONENT, Z_OFFSET)
-            # show_mesh_and_points(*shape(0), point_list)
-            exit(0)
+            if DEBUG_:
+                plot_histograms_with_function(point_list, b_min, b_max, Z_EXPONENT, Z_OFFSET)
+                visualize_mesh_with_points(deformed_boundary_points[t_index], faces, point_list[0:NUMBER_OF_POINTS_IN_VISUALISATION])
+                exit(0)
             signed_distances, _, _ = compute_signed_distances(point_list, deformed_boundary_points[t_index], faces)
             print(f"obtained signed distances")
 
@@ -616,13 +764,14 @@ def main(INDEX, SDF_ONLY, REPLACE):
             print(f"np.shape(filtered_points) = {np.shape(filtered_points)}")
             print(f"np.shape(signed_distances) = {np.shape(signed_distances)}")
             print(f"np.shape(filtered_signed_distances) = {np.shape(filtered_signed_distances)}")
-            print("\n\n")
 
             # Combine points and signed distances
             sdf_with_points = np.hstack((filtered_points, filtered_signed_distances[:, None]))
             f.create_dataset(f"time_{t_index}", data=sdf_with_points)
 
-            print(f"Processed time step {t_index}/{len(time_steps) -1}.")
+            print(f"Processed time step {t_index}/{len(time_steps) -1}")
+            print("----------------------------------------------------")
+            print("\n")
 
         print(f"Saved SDF results to {OUTPUT_FILE}.")
     # --- end of main------------------------------------------------------------------

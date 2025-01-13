@@ -1,2 +1,0 @@
-Epoch: 2
-Weights: 45.00605

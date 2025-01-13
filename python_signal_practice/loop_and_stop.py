@@ -5,9 +5,15 @@ import copy
 import sys
 import argparse
 import pickle
+import numpy as np
+
+import io
 
 # Change to the script's directory
 os.chdir(sys.path[0])
+
+# Import the Pushbullet notification function
+from send_notification_ln import main as send_notification
 
 # Constants
 RESULT_DIR = "./result_saved"
@@ -96,18 +102,33 @@ def simulate_execution(epoch):
 
 
 def get_max_epoch(state_type=None):
-    """Get the maximum epoch from the saved files."""
+    """Get the maximum epoch and the corresponding filename from the saved files."""
     try:
         files = os.listdir(RESULT_DIR)
         if state_type:
             files = [f for f in files if f.endswith(f"_{state_type}.pickle")]
+        else:
+            files = [f for f in files if f.endswith(".pickle")]
+
         if not files:
-            return None
-        epochs = [int(f.split("_")[1]) for f in files if f.startswith(FILENAME)]
-        return max(epochs)
+            return None, None
+
+        # Extract epochs and use numpy for efficient processing
+        epochs = np.array([int(f.split("_")[1]) for f in files if f.startswith(FILENAME)])
+        files = np.array(files)
+
+        # Find the maximum epoch and its corresponding file
+        max_index = np.argmax(epochs)
+        max_epoch = epochs[max_index]
+        full_filename = files[max_index]
+        filename = os.path.splitext(full_filename)[0]
+        filename = f"{RESULT_DIR}/{filename}"
+        print(f"filename = {filename}")
+
+        return max_epoch, filename
     except Exception as e:
         print(f"Error while retrieving epochs: {e}")
-        return None
+        return None, None
 
 
 def main(continue_run=False, state_type=None, epoch_override=None):
@@ -125,16 +146,16 @@ def main(continue_run=False, state_type=None, epoch_override=None):
 
         if epoch_override is not None:
             epoch = epoch_override
+            filename = f"{RESULT_DIR}/{FILENAME}_{epoch}_{state_type or 'stop'}"
         else:
-            epoch = get_max_epoch(state_type)
+            epoch, filename = get_max_epoch(state_type)
 
         if epoch is None:
             print(f"No saved state found to continue from.")
             return 1
 
         # Load weights from the saved state
-        filename = f"{RESULT_DIR}/{FILENAME}_{epoch}_{state_type or 'stop'}"
-        epoch, weights = load_state(filename)
+        _, weights = load_state(filename)
         if epoch is None:
             print(f"Failed to load state from {filename}.")
             return 1
@@ -142,12 +163,30 @@ def main(continue_run=False, state_type=None, epoch_override=None):
         print(f"Resuming from epoch {epoch} ({'all states' if state_type is None else state_type}).")
     else:
         print("Starting fresh training run...")
+        epoch = 0
 
     while epoch < 100:
-        print(f"Simulating epoch {epoch}...")
-        weights_previous = copy.deepcopy(weights)
-        weights = simulate_execution(epoch)
-        epoch += 1
+        # Create a StringIO object to capture the output
+        output_capture = io.StringIO()
+        # Redirect stdout to the StringIO object
+        original_stdout = sys.stdout
+        sys.stdout = output_capture
+
+        try:
+            print(f"Simulating epoch {epoch}...")
+            weights_previous = copy.deepcopy(weights)
+            weights = simulate_execution(epoch)
+            epoch += 1
+        finally:
+            # Reset stdout to its original state
+            sys.stdout = original_stdout
+
+        # Get the captured output as a string
+        captured_output = output_capture.getvalue()
+        print(captured_output)
+        # Send the captured output as a Pushbullet notification
+        notification_title = f"Epoch {epoch}"
+        send_notification(notification_title, captured_output)
 
         if stop_requested:
             filename = f"{RESULT_DIR}/{FILENAME}_{epoch}_stop"

@@ -1,7 +1,13 @@
 import argparse
 import os
+import sys
 import signal
 import subprocess
+
+# Change to the real path of the script's directory
+REAL_PATH = os.path.realpath(__file__)
+BASE_DIR = os.path.dirname(REAL_PATH)
+os.chdir(BASE_DIR)
 
 # Constant: The filename of the process to control
 FILENAME = "loop_and_stop.py"
@@ -18,7 +24,6 @@ def get_process_details(filename):
         list: A list of tuples containing PID and process details.
     """
     try:
-        # Use ps to get details of processes matching the filename
         result = subprocess.run(
             ["ps", "axo", "pid,cmd", "--no-headers"],
             check=True,
@@ -67,7 +72,37 @@ def select_process_with_fzf(processes):
         return None
 
 
-def main(stop, terminate, kill, all):
+def start_loop_and_stop(args):
+    """
+    Start loop_and_stop.py as a subprocess with the specified arguments.
+
+    Args:
+        args (Namespace): Parsed command-line arguments.
+    """
+    command = ["python", FILENAME]
+    if args.continue_run:
+        command.append("--continue_run")
+    if args.terminate:
+        command.append("--terminate")
+    if args.stop:
+        command.append("--stop")
+    if args.epoch is not None:
+        command.extend(["--epoch", str(args.epoch)])
+
+    print(f"Starting {FILENAME} with command: {' '.join(command)}")
+    try:
+        subprocess.Popen(command)  # Run as a background process
+        print(f"{FILENAME} started successfully.")
+    except Exception as e:
+        print(f"Error while starting {FILENAME}: {e}")
+
+
+def main(stop, terminate, kill, all, start, args):
+    # If --start is specified, start the process
+    if start:
+        start_loop_and_stop(args)
+        return 0
+
     # Get the processes matching the filename
     processes = get_process_details(FILENAME)
     if not processes:
@@ -103,9 +138,16 @@ def main(stop, terminate, kill, all):
     for pid in pids:
         send_signal(pid, signal_type)
 
+    return 0
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Control the loop_and_stop.py process.")
+    parser.add_argument(
+        "--start",
+        action="store_true",
+        help="Start loop_and_stop.py as a background process.",
+    )
     parser.add_argument(
         "--stop",
         action="store_true",
@@ -126,12 +168,34 @@ if __name__ == "__main__":
         action="store_true",
         help="If multiple processes are found, send the signal to all of them. If not provided, fzf will be used to select one.",
     )
+    parser.add_argument(
+        "--continue_run",
+        action="store_true",
+        help="Continue training from a saved state (used with --start).",
+    )
+    parser.add_argument(
+        "--epoch",
+        type=int,
+        default=None,
+        help="Specify the epoch to start from if continuing (used with --start).",
+    )
     args = parser.parse_args()
 
-    # Ensure only one signal option is provided
-    if sum([args.stop, args.terminate, args.kill]) != 1:
-        print("Error: You must specify exactly one of --stop, --terminate, or --kill.")
-        exit(1)
+    # Validation for `--start`
+    if args.start:
+        # Check for invalid combinations with `--start`
+        if args.kill:
+            print("Error: --kill cannot be used with --start.")
+            sys.exit(1)
+        if args.stop and args.terminate:
+            print("Error: --stop and --terminate cannot both be used with --start.")
+            sys.exit(1)
+    else:
+        # Ensure a signal flag is provided if `--start` is not used
+        if sum([args.stop, args.terminate, args.kill]) != 1:
+            print("Error: You must specify exactly one of --stop, --terminate, or --kill.")
+            sys.exit(1)
 
-    ret = main(args.stop, args.terminate, args.kill, args.all)
-    exit(ret)
+    # Call the main function
+    ret = main(args.stop, args.terminate, args.kill, args.all, args.start, args)
+    sys.exit(ret)
