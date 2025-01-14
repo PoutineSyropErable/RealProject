@@ -15,6 +15,7 @@ LOAD_DIR = "./training_data"
 
 # Directory where we save and load the neural weights
 NEURAL_WEIGHTS_DIR = "./neural_weights"
+LATENT_DIM = 256
 
 # Global variables to store weights and indices
 previous_encoder_weights_epoch = None
@@ -344,7 +345,7 @@ def train_model(
 
             total_loss += loss.item()
             # Custom logging for the learning rate
-            current_lr = scheduler._last_lr if hasattr(scheduler, "_last_lr") else scheduler.get_last_lr()
+            current_lr = scheduler.get_last_lr()
             print(f"\t\tTime Iteration {t_index}, Loss: {loss.item()}, Learning Rate: {current_lr}")
 
             epoch_losses.append(loss.item())  # Track loss for this time step
@@ -368,7 +369,7 @@ def train_model(
         loss_tracker.append(epoch_losses)  # Add losses for this epoch
         # Step the scheduler
         scheduler.step(total_loss)
-        print(f"Epoch {epoch + 1}/{epochs}, Loss: {total_loss:.4f}")
+        print(f" End of Epoch {epoch}/{epochs -1}, Loss: {total_loss}")
         # Handle stop epoch signal
         if stop_epoch_signal:
             print(f"Stopping after epoch {epoch + 1}.")
@@ -376,7 +377,34 @@ def train_model(
             exit(4)  # Exit with code 4
 
     print("Training complete.")
+
+    save_model_weights(previous_encoder_weights_epoch, previous_calculator_weights_epoch, epoch + 1, 0)
+    torch.save(optimizer.state_dict(), os.path.join(NEURAL_WEIGHTS_DIR, "optimizer_state.pth"))
+    torch.save(scheduler.state_dict(), os.path.join(NEURAL_WEIGHTS_DIR, "scheduler_state.pth"))
+
+    with open(os.path.join(NEURAL_WEIGHTS_DIR, "loss_tracker.pkl"), "wb") as f:
+        pickle.dump(loss_tracker, f)
+
     return mesh_encoder, sdf_calculator
+
+
+def load_optimizer_and_scheduler(optimizer, scheduler):
+    """To finish implementation"""
+    # Load optimizer and scheduler states
+    optimizer_state_path = os.path.join(NEURAL_WEIGHTS_DIR, "optimizer_state.pth")
+    scheduler_state_path = os.path.join(NEURAL_WEIGHTS_DIR, "scheduler_state.pth")
+
+    if os.path.exists(optimizer_state_path):
+        optimizer.load_state_dict(torch.load(optimizer_state_path))
+        print(f"Loaded optimizer state from {optimizer_state_path}.")
+    else:
+        print(f"Optimizer state not found at {optimizer_state_path}. Starting fresh.")
+
+    if os.path.exists(scheduler_state_path):
+        scheduler.load_state_dict(torch.load(scheduler_state_path))
+        print(f"Loaded scheduler state from {scheduler_state_path}.")
+    else:
+        print(f"Scheduler state not found at {scheduler_state_path}. Starting fresh.")
 
 
 def main(start_from_zero=True, continue_training=False, epoch_index=None, time_index=None):
@@ -415,8 +443,8 @@ def main(start_from_zero=True, continue_training=False, epoch_index=None, time_i
         vertices_tensor,
         sdf_points,
         sdf_values,
-        latent_dim=256,
-        epochs=100,
+        latent_dim=LATENT_DIM,
+        epochs=1000,
         learning_rate=1e-3,
         mesh_encoder=mesh_encoder,
         sdf_calculator=sdf_calculator,
