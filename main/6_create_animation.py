@@ -43,7 +43,9 @@ def get_array_from_conn(conn) -> np.ndarray:
     offsets = conn.offsets
 
     # Convert the flat connectivity array into a list of arrays
-    connectivity_2d = [connectivity_array[start:end] for start, end in zip(offsets[:-1], offsets[1:])]
+    connectivity_2d = [
+        connectivity_array[start:end] for start, end in zip(offsets[:-1], offsets[1:])
+    ]
 
     return np.array(connectivity_2d, dtype=object)
 
@@ -61,7 +63,9 @@ def get_mesh(filename: str) -> Tuple[mesh.Mesh, np.ndarray, np.ndarray]:
     domain = load_file(filename)
     points = domain.geometry.x  # Array of vertex coordinates
     conn = domain.topology.connectivity(3, 0)
-    connectivity = get_array_from_conn(conn).astype(np.int64)  # Convert to 2D numpy array
+    connectivity = get_array_from_conn(conn).astype(
+        np.int64
+    )  # Convert to 2D numpy array
 
     return domain, points, connectivity
 
@@ -82,9 +86,15 @@ def load_deformations(h5_file: str) -> Tuple[np.ndarray, np.ndarray]:
         f_group = function_group["f"]
 
         # Extract time steps and displacements
-        time_steps = np.array(sorted(f_group.keys(), key=lambda x: float(x)), dtype=float)
-        displacements = np.array([f_group[time_step][...] for time_step in f_group.keys()])
-        print(f"Loaded {len(time_steps)} time steps, Displacement tensor shape: {displacements.shape}")
+        time_steps = np.array(
+            sorted(f_group.keys(), key=lambda x: float(x)), dtype=float
+        )
+        displacements = np.array(
+            [f_group[time_step][...] for time_step in f_group.keys()]
+        )
+        print(
+            f"Loaded {len(time_steps)} time steps, Displacement tensor shape: {displacements.shape}"
+        )
 
     return time_steps, displacements
 
@@ -191,11 +201,15 @@ def find_cell_and_barycentric(points, connectivity, target_point):
     """
     for cell_index, cell in enumerate(connectivity):
         if len(cell) != 4:
-            raise ValueError(f"Cell at index {cell_index} does not have 4 vertices: {cell}")
+            raise ValueError(
+                f"Cell at index {cell_index} does not have 4 vertices: {cell}"
+            )
 
         vertices = points[cell]
         if vertices.shape != (4, 3):
-            raise ValueError(f"Unexpected vertices shape {vertices.shape} for cell {cell_index}")
+            raise ValueError(
+                f"Unexpected vertices shape {vertices.shape} for cell {cell_index}"
+            )
 
         bary_coords = compute_barycentric_coordinates(target_point, vertices)
         if is_point_in_tetrahedron(bary_coords):
@@ -203,7 +217,11 @@ def find_cell_and_barycentric(points, connectivity, target_point):
 
     # Fallback: Use closest points to find the closest cell
     closest_points_indices = get_closest_points(target_point, points)
-    candidate_cells = [cell_index for cell_index, cell in enumerate(connectivity) if np.any(np.isin(cell, closest_points_indices))]
+    candidate_cells = [
+        cell_index
+        for cell_index, cell in enumerate(connectivity)
+        if np.any(np.isin(cell, closest_points_indices))
+    ]
 
     if not candidate_cells:
         raise RuntimeError("No candidate cells found near the finger position.")
@@ -233,9 +251,13 @@ def get_finger_info(finger_position, points, connectivity):
         raise ValueError(f"Expected points shape (n_points, 3), but got {points.shape}")
 
     if connectivity.ndim != 2 or connectivity.shape[1] != 4:
-        raise ValueError(f"Expected connectivity shape (n_cells, 4), but got {connectivity.shape}")
+        raise ValueError(
+            f"Expected connectivity shape (n_cells, 4), but got {connectivity.shape}"
+        )
 
-    cell_index, bary_coords, fallback = find_cell_and_barycentric(points, connectivity, finger_position)
+    cell_index, bary_coords, fallback = find_cell_and_barycentric(
+        points, connectivity, finger_position
+    )
     return {
         "cell_index": cell_index,
         "barycentric_coordinates": bary_coords,
@@ -244,7 +266,12 @@ def get_finger_info(finger_position, points, connectivity):
 
 
 def animate_deformation(
-    points: np.ndarray, connectivity: np.ndarray, deformations: np.ndarray, finger_position: np.ndarray, output_file: str, offscreen: bool
+    points: np.ndarray,
+    connectivity: np.ndarray,
+    deformations: np.ndarray,
+    finger_position: np.ndarray,
+    output_file: str,
+    offscreen: bool,
 ):
     """
     Animate the deformation of the mesh using PyVista.
@@ -261,8 +288,12 @@ def animate_deformation(
 
     # Create a PyVista UnstructuredGrid
     num_cells = connectivity.shape[0]
-    cells = np.hstack([np.full((num_cells, 1), connectivity.shape[1]), connectivity]).flatten()
-    cell_types = np.full(num_cells, 10, dtype=np.uint8)  # 10 corresponds to tetrahedrons in PyVista
+    cells = np.hstack(
+        [np.full((num_cells, 1), connectivity.shape[1]), connectivity]
+    ).flatten()
+    cell_types = np.full(
+        num_cells, 10, dtype=np.uint8
+    )  # 10 corresponds to tetrahedrons in PyVista
     grid = pv.UnstructuredGrid(cells, cell_types, points)
 
     displacement_norms = np.linalg.norm(deformations[0], axis=1)
@@ -292,7 +323,10 @@ def animate_deformation(
         displacement_norms = np.linalg.norm(deformations[t_index], axis=1)
         grid.point_data["Displacement"] = displacement_norms
         # Update the actor to reflect new scalar values
-        actor.mapper.scalar_range = (np.min(displacement_norms), np.max(displacement_norms))
+        actor.mapper.scalar_range = (
+            np.min(displacement_norms),
+            np.max(displacement_norms),
+        )
         actor.mapper.update()
 
         # Write frame
@@ -318,7 +352,9 @@ def main(INDEX: int, OFFSCREEN: bool):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # Load mesh and deformations
-    points, connectivity, time_steps, deformations = load_mesh_and_deformations(XDMF_FILE, H5_FILE)
+    points, connectivity, time_steps, deformations = load_mesh_and_deformations(
+        XDMF_FILE, H5_FILE
+    )
 
     print(f"Loaded mesh points: {points.shape}")
     print(f"Loaded connectivity: {connectivity.shape}")
@@ -326,7 +362,8 @@ def main(INDEX: int, OFFSCREEN: bool):
 
     if connectivity.shape[1] != 4:
         raise ValueError(
-            f"Expected connectivity to define tetrahedral cells with 4 vertices, " f"but found {connectivity.shape[1]} vertices per cell."
+            f"Expected connectivity to define tetrahedral cells with 4 vertices, "
+            f"but found {connectivity.shape[1]} vertices per cell."
         )
 
     # Get finger position
@@ -343,15 +380,28 @@ def main(INDEX: int, OFFSCREEN: bool):
             print("\n\n")
 
     # Animate deformation
-    animate_deformation(points, connectivity, deformations, finger_position, OUTPUT_FILE, OFFSCREEN)
+    animate_deformation(
+        points, connectivity, deformations, finger_position, OUTPUT_FILE, OFFSCREEN
+    )
 
 
 if __name__ == "__main__":
     # Set up argument parsing
-    parser = argparse.ArgumentParser(description="Create animation from deformation data.")
+    parser = argparse.ArgumentParser(
+        description="Create animation from deformation data."
+    )
     parser.add_argument("--index", type=int, help="Index of the deformation scenario.")
-    parser.add_argument("index_pos", type=int, nargs="?", help="Index of the deformation scenario (positional).")
-    parser.add_argument("--offscreen", action="store_true", help="Enable offscreen rendering for the animation.")
+    parser.add_argument(
+        "index_pos",
+        type=int,
+        nargs="?",
+        help="Index of the deformation scenario (positional).",
+    )
+    parser.add_argument(
+        "--offscreen",
+        action="store_true",
+        help="Enable offscreen rendering for the animation.",
+    )
     args = parser.parse_args()
 
     # Determine the index from either --index or positional argument
@@ -360,6 +410,8 @@ if __name__ == "__main__":
     elif args.index_pos is not None:
         INDEX = args.index_pos
     else:
-        parser.error("Index must be provided either as '--index' or as a positional argument.")
+        parser.error(
+            "Index must be provided either as '--index' or as a positional argument."
+        )
 
     main(INDEX, args.offscreen)
