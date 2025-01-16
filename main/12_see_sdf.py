@@ -19,19 +19,19 @@ SDF_DIRECTORY = "./calculated_sdf"
 POINTS_TO_TAKE_SDF_FILE = "points_to_take_sdf.npy"
 
 
-
-
 def load_mesh_domain(xdmf_file):
     with XDMFFile(MPI.COMM_WORLD, xdmf_file, "r") as xdmf:
         domain = xdmf.read_mesh(name="Grid")
         print("Mesh loaded successfully!")
     return domain
 
+
 def load_displacement_data(h5_file):
     with h5py.File(h5_file, "r") as f:
         displacements = f["displacements"][:]
         print(f"Loaded displacement data with shape: {displacements.shape}")
     return displacements
+
 
 def load_mesh_t(xdmf_file, h5_file, time_index):
     domain = load_mesh_domain(xdmf_file)
@@ -44,7 +44,6 @@ def load_mesh_t(xdmf_file, h5_file, time_index):
     displacements_all_times = load_displacement_data(h5_file)
     points_moved = points + displacements_all_times[time_index]
     return points_moved, connectivity
-
 
 
 def load_sdf_data(displacement_index, time_index, sdf_only):
@@ -63,14 +62,14 @@ def load_sdf_data(displacement_index, time_index, sdf_only):
     input_file = f"./calculated_sdf/sdf_points_{displacement_index}{file_suffix}.h5"
 
     print(f"Loading SDF data from: {input_file}")
-    
+
     with h5py.File(input_file, "r") as f:
         dataset_name = f"time_{time_index}"
         if dataset_name not in f:
             raise KeyError(f"Dataset '{dataset_name}' not found in file {input_file}.")
-        
+
         data = f[dataset_name][:]
-        
+
         if sdf_only:
             # Return only the SDF values
             sdf = data
@@ -83,7 +82,6 @@ def load_sdf_data(displacement_index, time_index, sdf_only):
         return points, sdf
 
 
-
 def compute_small_bounding_box(mesh_points: np.ndarray) -> (np.ndarray, np.ndarray):
     """Compute the smallest bounding box for the vertices."""
     b_min = np.min(mesh_points, axis=0)
@@ -91,7 +89,9 @@ def compute_small_bounding_box(mesh_points: np.ndarray) -> (np.ndarray, np.ndarr
     return b_min, b_max
 
 
-def compute_bounding_box(mesh_points: np.ndarray, box_ratio: float = 1.5) -> (np.ndarray, np.ndarray):
+def compute_bounding_box(
+    mesh_points: np.ndarray, box_ratio: float = 1.5
+) -> (np.ndarray, np.ndarray):
     """Compute an expanded bounding box for the vertices."""
     b_min, b_max = compute_small_bounding_box(mesh_points)
 
@@ -105,7 +105,13 @@ def compute_bounding_box(mesh_points: np.ndarray, box_ratio: float = 1.5) -> (np
     return b_min, b_max
 
 
-def draw_bounding_box(b_min: np.ndarray, b_max: np.ndarray,name: str, color: tuple = (0.0, 1.0, 0.0), radius: float = 0.002):
+def draw_bounding_box(
+    b_min: np.ndarray,
+    b_max: np.ndarray,
+    name: str,
+    color: tuple = (0.0, 1.0, 0.0),
+    radius: float = 0.002,
+):
     """Draw a bounding box in Polyscope given min and max points."""
     # Create corners of the bounding box
     box_corners = np.array(
@@ -144,6 +150,7 @@ def draw_bounding_box(b_min: np.ndarray, b_max: np.ndarray,name: str, color: tup
     ps_bounding_box.set_radius(radius)  # Adjust bounding box line thickness
     ps_bounding_box.set_color(color)  # Set the color for the bounding box
 
+
 def get_surface_mesh(points: np.ndarray, connectivity: np.ndarray):
     """Extract the surface mesh from the tetrahedral mesh."""
     cells = np.hstack([np.full((connectivity.shape[0], 1), 4), connectivity]).flatten()
@@ -160,16 +167,20 @@ def get_surface_mesh(points: np.ndarray, connectivity: np.ndarray):
     return vertices, faces
 
 
+def show_result_in_polyscope(
+    mesh_points,
+    mesh_connectivity,
+    filtered_points,
+    filtered_signed_distances,
+    finger_position,
+    R,
+):
 
-
-
-def show_result_in_polyscope(mesh_points, mesh_connectivity, filtered_points, filtered_signed_distances, finger_position, R):
-
-    #----------------------------------- Start and add the Bunny MESH
+    # ----------------------------------- Start and add the Bunny MESH
     ps.init()
     ps_mesh = ps.register_surface_mesh("Bunny", mesh_points, mesh_connectivity)
 
-    #------------------------------------ Add the point cloud where sdf are calculated
+    # ------------------------------------ Add the point cloud where sdf are calculated
     NUMBER_OF_POINTS = min(20_000, len(filtered_points))
     ps_cloud = ps.register_point_cloud(
         "Filtered Points", filtered_points[:NUMBER_OF_POINTS], radius=0.0025
@@ -178,7 +189,7 @@ def show_result_in_polyscope(mesh_points, mesh_connectivity, filtered_points, fi
         "Signed Distances", filtered_signed_distances[:NUMBER_OF_POINTS]
     )
 
-    #------------------------------------- Add the lines connecting the point cloud to the surface
+    # ------------------------------------- Add the lines connecting the point cloud to the surface
     NUMBER_OF_LINES = min(100, len(filtered_points))
 
     # Calculate the nearest points only for the points used in the lines
@@ -203,9 +214,10 @@ def show_result_in_polyscope(mesh_points, mesh_connectivity, filtered_points, fi
     ps_lines.set_radius(0.001)  # Adjust line thickness
     ps_lines.set_color((0.0, 1.0, 1.0))  # Cyan color for the lines
 
-
-    #-------------------------------------------- Add a single point to represent the sphere's center
-    ps_finger = ps.register_point_cloud("Finger Position", np.array([finger_position]), radius=3*R)
+    # -------------------------------------------- Add a single point to represent the sphere's center
+    ps_finger = ps.register_point_cloud(
+        "Finger Position", np.array([finger_position]), radius=3 * R
+    )
     ps_finger.set_color((1.0, 0.0, 0.0))  # Red color for the point
 
     # Compute and draw the larger bounding box
@@ -226,22 +238,50 @@ def show_result_in_polyscope(mesh_points, mesh_connectivity, filtered_points, fi
 
     ps.show()
 
+
 def validate_indices(index, displacement_index):
     """Validate if both index and displacement_index are provided and consistent."""
-    if index is not None and displacement_index is not None and index != displacement_index:
+    if (
+        index is not None
+        and displacement_index is not None
+        and index != displacement_index
+    ):
         raise ValueError(
             f"Inconsistent indices: --index={index} and --displacement_index={displacement_index}. "
             f"Please provide matching values or only one of these arguments."
         )
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Visualize mesh displacement using precomputed SDF.")
-    parser.add_argument("positional_index", type=int, nargs="?", help="Positional index of the displacement file.")
-    parser.add_argument("positional_time_index", type=int, nargs="?", help="Positional index of the time step.")
-    parser.add_argument("--index", type=int, help="Index of the displacement file to use.")
-    parser.add_argument("--displacement_index", type=int, help="Alternative index of the displacement file to use.")
-    parser.add_argument("--time_index", type=int, help="Index of the time step to visualize.")
-    parser.add_argument("--sdf_only", action="store_true", help="Use precomputed SDF-only data.")
+    parser = argparse.ArgumentParser(
+        description="Visualize mesh displacement using precomputed SDF."
+    )
+    parser.add_argument(
+        "positional_index",
+        type=int,
+        nargs="?",
+        help="Positional index of the displacement file.",
+    )
+    parser.add_argument(
+        "positional_time_index",
+        type=int,
+        nargs="?",
+        help="Positional index of the time step.",
+    )
+    parser.add_argument(
+        "--index", type=int, help="Index of the displacement file to use."
+    )
+    parser.add_argument(
+        "--displacement_index",
+        type=int,
+        help="Alternative index of the displacement file to use.",
+    )
+    parser.add_argument(
+        "--time_index", type=int, help="Index of the time step to visualize."
+    )
+    parser.add_argument(
+        "--sdf_only", action="store_true", help="Use precomputed SDF-only data."
+    )
 
     args = parser.parse_args()
 
@@ -251,7 +291,7 @@ def main():
 
     # Ensure defaults if not provided
     displacement_index = displacement_index if displacement_index is not None else 0
-    time_index = time_index if time_index is not None else 10
+    time_index = time_index if time_index is not None else 90
 
     # Validate consistency
     validate_indices(args.index, args.displacement_index)
@@ -265,7 +305,7 @@ def main():
     # File containing finger_positions (after filtering) [Active Filter: Z>Z_min | no finger of grounded foot]
     # Wanted filter: Z > Z_min and Z < Z_max | points are on the head or near root of ears
     FINGER_POSITIONS_FILES = "filtered_points_of_force_on_boundary.txt"
-    finger_positions = np.loadtxt(FINGER_POSITIONS_FILES , skiprows=1)
+    finger_positions = np.loadtxt(FINGER_POSITIONS_FILES, skiprows=1)
     # Swap Y and Z because poylscope use weird data
     finger_positions[:, [1, 2]] = finger_positions[:, [2, 1]]
     finger_position = finger_positions[displacement_index]
@@ -273,17 +313,15 @@ def main():
 
     # Construct file paths
     displacement_file = f"{DISPLACEMENT_DIRECTORY}/displacement_{displacement_index}.h5"
-    mesh_points, mesh_connectivity = load_mesh_t(BUNNY_FILE, displacement_file, time_index)
+    mesh_points, mesh_connectivity = load_mesh_t(
+        BUNNY_FILE, displacement_file, time_index
+    )
 
     print(f"np.shape(mesh_points) = {np.shape(mesh_points)}")
     print(f"mesh_points = \n{mesh_points}\n")
 
     print(f"np.shape(mesh_connectivity) = {np.shape(mesh_connectivity)}")
     print(f"mesh_connectivity = \n{mesh_connectivity}\n")
-
-
-
-
 
     # Load precomputed SDF data
     points, sdf = load_sdf_data(displacement_index, time_index, sdf_only)
@@ -293,9 +331,6 @@ def main():
     print(f"np.shape(sdf) = {np.shape(sdf)}")
     print(f"sdf = \n{sdf}\n")
 
-
-
-
     # Swap Y and Z because poylscope use weird data
     mesh_points[:, [1, 2]] = mesh_points[:, [2, 1]]
     points[:, [1, 2]] = points[:, [2, 1]]
@@ -303,9 +338,10 @@ def main():
     print(f"Loaded points shape: {points.shape}")
     print(f"Loaded SDF shape: {sdf.shape}")
 
+    show_result_in_polyscope(
+        mesh_points, mesh_connectivity, points, sdf, finger_position, R
+    )
 
-    show_result_in_polyscope(mesh_points, mesh_connectivity, points, sdf, finger_position, R)
 
 if __name__ == "__main__":
     main()
-

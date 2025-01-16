@@ -14,8 +14,17 @@ os.chdir(sys.path[0])
 # Set up argument parsing
 parser = argparse.ArgumentParser(description="Create animation from deformation data.")
 parser.add_argument("--index", type=int, help="Index of the deformation scenario.")
-parser.add_argument("index_pos", type=int, nargs="?", help="Index of the deformation scenario (positional).")
-parser.add_argument("--offscreen", action="store_true", help="Enable offscreen rendering for the animation.")
+parser.add_argument(
+    "index_pos",
+    type=int,
+    nargs="?",
+    help="Index of the deformation scenario (positional).",
+)
+parser.add_argument(
+    "--offscreen",
+    action="store_true",
+    help="Enable offscreen rendering for the animation.",
+)
 
 # Parse arguments
 args = parser.parse_args()
@@ -26,7 +35,9 @@ if args.index is not None:
 elif args.index_pos is not None:
     INDEX = args.index_pos
 else:
-    parser.error("Index must be provided either as '--index' or as a positional argument.")
+    parser.error(
+        "Index must be provided either as '--index' or as a positional argument."
+    )
 
 print(f"Using index: {INDEX}")
 R = 0.003  # Radius of the sphere
@@ -40,6 +51,8 @@ mesh_file = "bunny.xdmf"
 displacement_file = f"{DIRECTORY}/displacement_{INDEX}.h5"
 FILTERED_POINTS_FILE = "./filtered_points_of_force_on_boundary.txt"
 
+os.makedirs(ANIMATION_DIRECTORY, exist_ok=True)
+
 
 def load_mesh(xdmf_file):
     """
@@ -49,6 +62,7 @@ def load_mesh(xdmf_file):
         domain = xdmf.read_mesh(name="Grid")
         print("Mesh loaded successfully!")
     return domain
+
 
 def load_displacement_data(h5_file):
     """
@@ -60,10 +74,11 @@ def load_displacement_data(h5_file):
     return displacements
 
 
-def get_finger_position(index):    
+def get_finger_position(index):
     filtered_points = np.loadtxt(FILTERED_POINTS_FILE, skiprows=1)
     finger_position = filtered_points[index]
     return finger_position
+
 
 def animate_displacement(mesh, displacements, finger_position, offscreen):
     """
@@ -73,13 +88,18 @@ def animate_displacement(mesh, displacements, finger_position, offscreen):
     num_steps = displacements.shape[0]
 
     # Create PyVista grid of the mesh, This part shows the bunny
-    connectivity = mesh.topology.connectivity(3, 0).array.reshape((-1, 4))  # Assuming tetrahedral mesh
-    cell_types = np.full(connectivity.shape[0], 10, dtype=np.uint8)  # PyVista tetrahedron cell type is 10
-    cells = np.hstack([np.full((connectivity.shape[0], 1), 4), connectivity]).flatten()  # Add node count per cell
+    connectivity = mesh.topology.connectivity(3, 0).array.reshape(
+        (-1, 4)
+    )  # Assuming tetrahedral mesh
+    cell_types = np.full(
+        connectivity.shape[0], 10, dtype=np.uint8
+    )  # PyVista tetrahedron cell type is 10
+    cells = np.hstack(
+        [np.full((connectivity.shape[0], 1), 4), connectivity]
+    ).flatten()  # Add node count per cell
     grid = pv.UnstructuredGrid(cells, cell_types, points)
 
-    # 
-
+    #
 
     # Add initial displacement norms as scalar data
     displacement_norms = np.linalg.norm(displacements[0], axis=1)
@@ -95,7 +115,9 @@ def animate_displacement(mesh, displacements, finger_position, offscreen):
     plotter.add_mesh(finger_marker, color="green", label="Finger Position", opacity=1.0)
 
     # Add mesh to the plotter
-    actor = plotter.add_mesh(grid, show_edges=True, scalars="Displacement", colormap="coolwarm")
+    actor = plotter.add_mesh(
+        grid, show_edges=True, scalars="Displacement", colormap="coolwarm"
+    )
     plotter.show_grid()
 
     # Open movie file for writing
@@ -127,4 +149,3 @@ finger_position = get_finger_position(INDEX)
 
 # Animate displacement
 animate_displacement(domain, displacement_data, finger_position, args.offscreen)
-
