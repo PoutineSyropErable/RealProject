@@ -10,12 +10,14 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import numpy as np
 import copy
 
+from enum import Enum
+
 # Directory containing the pickle files
 LOAD_DIR = "./training_data"
 
 # Directory where we save and load the neural weights
 NEURAL_WEIGHTS_DIR = "./neural_weights"
-LATENT_DIM = 256
+LATENT_DIM = 64
 
 # Global variables to store weights and indices
 previous_encoder_weights_epoch = None
@@ -51,7 +53,12 @@ def handle_save_epoch_signal(signum, frame):
     """
 
     print("Received termination signal. Saving weights and continuing...")
-    save_model_weights(previous_encoder_weights_epoch, previous_calculator_weights_epoch, previous_epoch_index, 0)
+    save_model_weights(
+        previous_encoder_weights_epoch,
+        previous_calculator_weights_epoch,
+        previous_epoch_index,
+        0,
+    )
 
 
 def handle_save_time_signal(signum, frame):
@@ -61,7 +68,12 @@ def handle_save_time_signal(signum, frame):
     """
 
     print("Received termination signal. Saving weights and continuing...")
-    save_model_weights(previous_encoder_weights_time, previous_calculator_weights_time, previous_epoch_index, previous_time_index)
+    save_model_weights(
+        previous_encoder_weights_time,
+        previous_calculator_weights_time,
+        previous_epoch_index,
+        previous_time_index,
+    )
 
 
 def handle_termination(signum, frame):
@@ -76,9 +88,19 @@ def handle_termination(signum, frame):
 
     if previous_epoch_index == None:
         previous_epoch_index = 0
-        save_model_weights(previous_encoder_weights_time, previous_calculator_weights_time, previous_epoch_index, previous_time_index)
+        save_model_weights(
+            previous_encoder_weights_time,
+            previous_calculator_weights_time,
+            previous_epoch_index,
+            previous_time_index,
+        )
     print("Received termination signal. Saving weights before exiting...")
-    save_model_weights(previous_encoder_weights_time, previous_calculator_weights_time, previous_epoch_index + 1, previous_time_index)
+    save_model_weights(
+        previous_encoder_weights_time,
+        previous_calculator_weights_time,
+        previous_epoch_index + 1,
+        previous_time_index,
+    )
     exit(1)
 
 
@@ -91,7 +113,9 @@ def get_latest_saved_indices():
     weights_files = [f for f in os.listdir(NEURAL_WEIGHTS_DIR) if f.endswith(".pth")]
     if not weights_files:
         return 0, 0  # No weights saved yet
-    epochs_times = [tuple(map(int, f.split("_")[2:5:2])) for f in weights_files]  # Extract epoch and time indices
+    epochs_times = [
+        tuple(map(int, f.split("_")[2:5:2])) for f in weights_files
+    ]  # Extract epoch and time indices
     return max(epochs_times)  # Return the latest epoch and time index
 
 
@@ -103,7 +127,11 @@ def get_latest_saved_time_for_epoch(epoch):
     Returns:
         int: Latest time index for the given epoch.
     """
-    weights_files = [f for f in os.listdir(NEURAL_WEIGHTS_DIR) if f.endswith(".pth") and f"epoch_{epoch}_" in f]
+    weights_files = [
+        f
+        for f in os.listdir(NEURAL_WEIGHTS_DIR)
+        if f.endswith(".pth") and f"epoch_{epoch}_" in f
+    ]
     if not weights_files:
         raise ValueError(f"No saved weights found for epoch {epoch}.")
     time_indices = [int(f.split("_")[4]) for f in weights_files]  # Extract time index
@@ -212,7 +240,9 @@ class SDFCalculator(nn.Module):
             torch.Tensor: SDF values of shape (batch_size, num_points, 1).
         """
         batch_size, num_points, _ = coordinates.size()
-        latent_repeated = latent_vector.unsqueeze(1).repeat(1, num_points, 1)  # Repeat latent vector for each point
+        latent_repeated = latent_vector.unsqueeze(1).repeat(
+            1, num_points, 1
+        )  # Repeat latent vector for each point
         inputs = torch.cat([latent_repeated, coordinates], dim=-1)
         x = F.relu(self.fc1(inputs))
         x = F.relu(self.fc2(x))
@@ -231,8 +261,12 @@ def save_model_weights(encoder_weights, calculator_weights, epoch_index, time_in
         epoch_index (int): Current epoch index.
         time_index (int): Current time index.
     """
-    encoder_weights_path = os.path.join(NEURAL_WEIGHTS_DIR, f"encoder_epoch_{epoch_index}_time_{time_index}.pth")
-    calculator_weights_path = os.path.join(NEURAL_WEIGHTS_DIR, f"calculator_epoch_{epoch_index}_time_{time_index}.pth")
+    encoder_weights_path = os.path.join(
+        NEURAL_WEIGHTS_DIR, f"encoder_epoch_{epoch_index}_time_{time_index}.pth"
+    )
+    calculator_weights_path = os.path.join(
+        NEURAL_WEIGHTS_DIR, f"calculator_epoch_{epoch_index}_time_{time_index}.pth"
+    )
 
     os.makedirs(NEURAL_WEIGHTS_DIR, exist_ok=True)  # Ensure the directory exists
 
@@ -248,8 +282,12 @@ def load_model_weights(encoder, calculator, epoch_index, time_index):
     Placeholder function to load the weights for the encoder and calculator models.
     """
     # Replace with the actual mechanism to load weights, e.g., from files or a database.
-    encoder_weights_path = os.path.join(NEURAL_WEIGHTS_DIR, f"encoder_epoch_{epoch_index}_time_{time_index}.pth")
-    calculator_weights_path = os.path.join(NEURAL_WEIGHTS_DIR, f"calculator_epoch_{epoch_index}_time_{time_index}.pth")
+    encoder_weights_path = os.path.join(
+        NEURAL_WEIGHTS_DIR, f"encoder_epoch_{epoch_index}_time_{time_index}.pth"
+    )
+    calculator_weights_path = os.path.join(
+        NEURAL_WEIGHTS_DIR, f"calculator_epoch_{epoch_index}_time_{time_index}.pth"
+    )
 
     if os.path.exists(encoder_weights_path):
         encoder.load_state_dict(torch.load(encoder_weights_path))
@@ -261,18 +299,137 @@ def load_model_weights(encoder, calculator, epoch_index, time_index):
         calculator.load_state_dict(torch.load(calculator_weights_path))
         print(f"Loaded calculator weights from {calculator_weights_path}.")
     else:
-        raise FileNotFoundError(f"Calculator weights not found at {calculator_weights_path}.")
+        raise FileNotFoundError(
+            f"Calculator weights not found at {calculator_weights_path}."
+        )
+
+
+def get_path(name: str, epoch_index: int, time_index: int):
+    return os.path.join(
+        NEURAL_WEIGHTS_DIR, f"{name}_epoch_{epoch_index}_time_{time_index}.pth"
+    )
+
+
+def load_dict_from_path(object, path):
+    if os.path.exists(path):
+        object.load_state_dict(torch.load(path))
+        print(f"Loaded encoder weights from {path}.")
+    else:
+        raise FileNotFoundError(f"Weights/State file not found: {path} Doesn't exist")
+
+
+class SaveMode(Enum):
+    NowTime = 1
+    NowEpoch = 2
+    NextTimeItteration = 3
+    NextEpochItteration = 4
+    End = 5
+
+
+class TrainingContext:
+    def __init__(self, encoder: MeshEncoder, sdf_calculator: SDFCalculator):
+        self.previous_time_index = None
+        self.previous_epoch_index = None
+
+        self.previous_encoder_weights_epoch = None
+        self.previous_calculator_weights_epoch = None
+        self.previous_encoder_weights_time = None
+        self.previous_calculator_weights_time = None
+        self.previous_time_index = None
+        self.previous_epoch_index = None
+
+        self.previous_optimizer_state_epoch = None
+        self.previous_scheduler_state_epoch = None
+        self.previous_optimizer_state_time = None
+        self.previous_scheduler_state_time = None
+
+        self.mesh_encoder = encoder
+        self.sdf_calculator = sdf_calculator
+
+        self.optimizer = None
+        self.scheduler = None
+
+    def load_model_weights(self, epoch_index, time_index):
+        encoder_weights_path = get_path("encoder", epoch_index, time_index)
+        calculator_weights_path = get_path("sdf_calculator", epoch_index, time_index)
+        optimizer_state_path = get_path("optimizer", epoch_index, time_index)
+        scheduler_state_path = get_path("scheduler", epoch_index, time_index)
+
+        load_dict_from_path(self.mesh_encoder, encoder_weights_path)
+        load_dict_from_path(self.sdf_calculator, calculator_weights_path)
+        load_dict_from_path(self.optimizer, optimizer_state_path)
+        load_dict_from_path(self.scheduler, scheduler_state_path)
+
+    def save_model_weights(self, mode: SaveMode):
+
+        if self.previous_time_index == None or self.previous_epoch_index == None:
+            print("Nothing to save, nothing was done yet")
+            exit(0)
+
+        if mode == SaveMode.NowTime:
+            epoch_index = self.previous_epoch_index
+            time_index = self.previous_time_index
+            encoder_weights = self.previous_encoder_weights_time
+            sdf_calculator_weights = self.previous_calculator_weights_time
+            optimizer_state = self.previous_optimizer_state_time
+            scheduler_sate = self.previous_scheduler_state_time
+        elif mode == SaveMode.NextTimeItteration:
+            epoch_index = self.previous_epoch_index
+            time_index = self.previous_time_index + 1
+            encoder_weights = self.previous_encoder_weights_time
+            sdf_calculator_weights = self.previous_calculator_weights_time
+            optimizer_state = self.previous_optimizer_state_time
+            scheduler_sate = self.previous_scheduler_state_time
+        elif mode == SaveMode.NextEpochItteration or SaveMode.End:
+            epoch_index = self.previous_epoch_index + 1
+            time_index = 0
+            encoder_weights = self.previous_encoder_weights_epoch
+            sdf_calculator_weights = self.previous_calculator_weights_epoch
+            optimizer_state = self.previous_optimizer_state_epoch
+            scheduler_sate = self.previous_scheduler_state_epoch
+
+        encoder_weights_path = get_path("encoder", epoch_index, time_index)
+        calculator_weights_path = get_path("sdf_calculator", epoch_index, time_index)
+        optimizer_state_path = get_path("optimizer", epoch_index, time_index)
+        scheduler_state_path = get_path("scheduler", epoch_index, time_index)
+
+        torch.save(encoder_weights, encoder_weights_path)
+        torch.save(sdf_calculator_weights, calculator_weights_path)
+        torch.save(optimizer_state, optimizer_state_path)
+        torch.save(scheduler_state, scheduler_state_path)
+
+    def time_update(self, time_index):
+        self.previous_encoder_weights_time = copy.deepcopy(
+            self.mesh_encoder.state_dict()
+        )
+
+        self.previous_calculator_weights_time = copy.deepcopy(
+            self.sdf_calculator.state_dict()
+        )
+        self.previous_optimizer_state_time = copy.deepcopy(self.optimizer.state_dict())
+        self.previous_scheduler_state_time = copy.deepcopy(self.scheduler.state_dict())
+        self.previous_time_index = time_index
+
+    def epoch_update(self, epoch_index):
+        self.previous_encoder_weights_epoch = copy.deepcopy(
+            self.mesh_encoder.state_dict()
+        )
+        self.previous_calculator_weights_epoch = copy.deepcopy(
+            self.sdf_calculator.state_dict()
+        )
+        self.previous_optimizer_state_epoch = copy.deepcopy(self.optimizer.state_dict())
+        self.previous_scheduler_state_epoch = copy.deepcopy(self.scheduler.state_dict())
+        self.previous_epoch_index = epoch_index
 
 
 def train_model(
     vertices_tensor,
     sdf_points,
     sdf_values,
-    latent_dim=256,
-    epochs=100,
-    learning_rate=1e-3,
-    mesh_encoder=None,
-    sdf_calculator=None,
+    latent_dim=64,
+    epochs=1000,
+    learning_rate=5e-4,
+    previousState=None,
     start_epoch=0,
     start_time=0,
 ):
@@ -297,9 +454,15 @@ def train_model(
     global previous_time_index, previous_epoch_index
 
     # Convert inputs to PyTorch tensors
-    vertices_tensor = torch.tensor(vertices_tensor, dtype=torch.float32)  # (time_steps, num_vertices, 3)
-    sdf_points = torch.tensor(sdf_points, dtype=torch.float32)  # (time_steps, num_points, 3)
-    sdf_values = torch.tensor(sdf_values, dtype=torch.float32).unsqueeze(-1)  # (time_steps, num_points, 1)
+    vertices_tensor = torch.tensor(
+        vertices_tensor, dtype=torch.float32
+    )  # (time_steps, num_vertices, 3)
+    sdf_points = torch.tensor(
+        sdf_points, dtype=torch.float32
+    )  # (time_steps, num_points, 3)
+    sdf_values = torch.tensor(sdf_values, dtype=torch.float32).unsqueeze(
+        -1
+    )  # (time_steps, num_points, 1)
 
     # Initialize models if not provided
     input_dim = vertices_tensor.shape[1] * vertices_tensor.shape[2]  # num_vertices * 3
@@ -313,7 +476,9 @@ def train_model(
         list(mesh_encoder.parameters()) + list(sdf_calculator.parameters()),
         lr=learning_rate,
     )
-    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.7, patience=4, verbose=True)
+    scheduler = ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.7, patience=4, verbose=True
+    )
     criterion = nn.MSELoss()
     # Initialize loss tracker
     loss_tracker = []
@@ -324,12 +489,18 @@ def train_model(
         print(f"start of epoch {epoch}")
         total_loss = 0
         epoch_losses = []  # Store losses for this epoch
-        for t_index in range(start_time if epoch == start_epoch else 0, vertices_tensor.shape[0]):
+        for t_index in range(
+            start_time if epoch == start_epoch else 0, vertices_tensor.shape[0]
+        ):
             optimizer.zero_grad()
 
             # Get data for the current time step
-            vertices = vertices_tensor[t_index].view(1, -1)  # Flatten vertices (1, num_vertices * 3)
-            points = sdf_points[t_index].unsqueeze(0)  # Add batch dimension (1, num_points, 3)
+            vertices = vertices_tensor[t_index].view(
+                1, -1
+            )  # Flatten vertices (1, num_vertices * 3)
+            points = sdf_points[t_index].unsqueeze(
+                0
+            )  # Add batch dimension (1, num_points, 3)
             ground_truth_sdf = sdf_values[t_index].unsqueeze(0)  # (1, num_points, 1)
 
             # Encode vertices to latent vector
@@ -346,25 +517,33 @@ def train_model(
             total_loss += loss.item()
             # Custom logging for the learning rate
             current_lr = scheduler.get_last_lr()
-            print(f"\t\tTime Iteration {t_index}, Loss: {loss.item()}, Learning Rate: {current_lr}")
+            print(
+                f"\t\tTime Iteration {t_index}, Loss: {loss.item()}, Learning Rate: {current_lr}"
+            )
 
             epoch_losses.append(loss.item())  # Track loss for this time step
 
             # Store weights for the previous time step
-            previous_encoder_weights_time = copy.deepcopy(mesh_encoder.state_dict())
-            previous_calculator_weights_time = copy.deepcopy(sdf_calculator.state_dict())
-            previous_time_index = t_index
+            previousState.time_update(t_index)
 
             # Handle stop time signal
             if stop_time_signal:
-                print(f"Stopping after time iteration {t_index + 1}/{vertices_tensor.shape[0]}.")
-                save_model_weights(previous_encoder_weights_time, previous_calculator_weights_time, epoch, t_index + 1)
+                print(
+                    f"Stopping after time iteration {t_index + 1}/{vertices_tensor.shape[0]}."
+                )
+                save_model_weights(
+                    previous_encoder_weights_time,
+                    previous_calculator_weights_time,
+                    epoch,
+                    t_index + 1,
+                )
                 exit(3)  # Exit with code 3
 
         # Store weights for the previous epoch
         previous_encoder_weights_epoch = copy.deepcopy(mesh_encoder.state_dict())
         previous_calculator_weights_epoch = copy.deepcopy(sdf_calculator.state_dict())
         previous_epoch_index = epoch
+        previousState.epoch_update()
 
         loss_tracker.append(epoch_losses)  # Add losses for this epoch
         # Step the scheduler
@@ -373,14 +552,25 @@ def train_model(
         # Handle stop epoch signal
         if stop_epoch_signal:
             print(f"Stopping after epoch {epoch + 1}.")
-            save_model_weights(previous_encoder_weights_epoch, previous_calculator_weights_epoch, epoch + 1, 0)
+            save_model_weights(
+                previous_encoder_weights_epoch,
+                previous_calculator_weights_epoch,
+                epoch + 1,
+                0,
+            )
             exit(4)  # Exit with code 4
 
     print("Training complete.")
 
-    save_model_weights(previous_encoder_weights_epoch, previous_calculator_weights_epoch, epoch + 1, 0)
-    torch.save(optimizer.state_dict(), os.path.join(NEURAL_WEIGHTS_DIR, "optimizer_state.pth"))
-    torch.save(scheduler.state_dict(), os.path.join(NEURAL_WEIGHTS_DIR, "scheduler_state.pth"))
+    save_model_weights(
+        previous_encoder_weights_epoch, previous_calculator_weights_epoch, epoch + 1, 0
+    )
+    torch.save(
+        optimizer.state_dict(), os.path.join(NEURAL_WEIGHTS_DIR, "optimizer_state.pth")
+    )
+    torch.save(
+        scheduler.state_dict(), os.path.join(NEURAL_WEIGHTS_DIR, "scheduler_state.pth")
+    )
 
     with open(os.path.join(NEURAL_WEIGHTS_DIR, "loss_tracker.pkl"), "wb") as f:
         pickle.dump(loss_tracker, f)
@@ -388,32 +578,19 @@ def train_model(
     return mesh_encoder, sdf_calculator
 
 
-def load_optimizer_and_scheduler(optimizer, scheduler):
-    """To finish implementation"""
-    # Load optimizer and scheduler states
-    optimizer_state_path = os.path.join(NEURAL_WEIGHTS_DIR, "optimizer_state.pth")
-    scheduler_state_path = os.path.join(NEURAL_WEIGHTS_DIR, "scheduler_state.pth")
-
-    if os.path.exists(optimizer_state_path):
-        optimizer.load_state_dict(torch.load(optimizer_state_path))
-        print(f"Loaded optimizer state from {optimizer_state_path}.")
-    else:
-        print(f"Optimizer state not found at {optimizer_state_path}. Starting fresh.")
-
-    if os.path.exists(scheduler_state_path):
-        scheduler.load_state_dict(torch.load(scheduler_state_path))
-        print(f"Loaded scheduler state from {scheduler_state_path}.")
-    else:
-        print(f"Scheduler state not found at {scheduler_state_path}. Starting fresh.")
-
-
-def main(start_from_zero=True, continue_training=False, epoch_index=None, time_index=None):
+def main(
+    start_from_zero=True, continue_training=False, epoch_index=None, time_index=None
+):
     # Register signal handlers
     signal.signal(signal.SIGTERM, handle_termination)  # Kill (no -9)
     signal.signal(signal.SIGINT, handle_termination)  # KeyboardInterrupt
     signal.signal(signal.SIGTSTP, handle_termination)  # Ctrl+Z
-    signal.signal(signal.SIGUSR1, handle_stop_time_signal)  # Example: SIGUSR1 for stopping time iteration
-    signal.signal(signal.SIGUSR2, handle_stop_epoch_signal)  # Example: SIGUSR2 for stopping epoch iteration
+    signal.signal(
+        signal.SIGUSR1, handle_stop_time_signal
+    )  # Example: SIGUSR1 for stopping time iteration
+    signal.signal(
+        signal.SIGUSR2, handle_stop_epoch_signal
+    )  # Example: SIGUSR2 for stopping epoch iteration
     signal.signal(signal.SIGRTMIN, handle_save_epoch_signal)
     signal.signal(signal.SIGRTMIN + 1, handle_save_time_signal)
 
@@ -434,9 +611,13 @@ def main(start_from_zero=True, continue_training=False, epoch_index=None, time_i
     mesh_encoder = MeshEncoder(input_dim=input_dim, latent_dim=256)
     sdf_calculator = SDFCalculator(latent_dim=256)
 
+    global previousState
+    previousState = TrainingContext()
+
     # Load weights if continuing training
     if continue_training:
         load_model_weights(mesh_encoder, sdf_calculator, epoch_index, time_index)
+        previousState.load_model_weights(epoch_index, time_index)
 
     # Train model
     train_model(
@@ -457,22 +638,44 @@ def main(start_from_zero=True, continue_training=False, epoch_index=None, time_i
 
 if __name__ == "__main__":
     # Set up argument parser
-    parser = argparse.ArgumentParser(description="Process preprocessed data with options to start or continue.")
+    parser = argparse.ArgumentParser(
+        description="Process preprocessed data with options to start or continue."
+    )
 
     # Mutually exclusive group for start or continue training
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--start_from_zero", action="store_true", help="Start processing from the beginning.")
-    group.add_argument("--continue_training", action="store_true", help="Continue processing from the last state.")
+    group.add_argument(
+        "--start_from_zero",
+        action="store_true",
+        help="Start processing from the beginning.",
+    )
+    group.add_argument(
+        "--continue_training",
+        action="store_true",
+        help="Continue processing from the last state.",
+    )
 
     # Arguments for epoch and time indices
-    parser.add_argument("--epoch_index", type=int, help="Specify the epoch index to continue processing from.")
-    parser.add_argument("--time_index", type=int, help="Specify the time index to continue processing from.")
+    parser.add_argument(
+        "--epoch_index",
+        type=int,
+        help="Specify the epoch index to continue processing from.",
+    )
+    parser.add_argument(
+        "--time_index",
+        type=int,
+        help="Specify the time index to continue processing from.",
+    )
 
     args = parser.parse_args()
 
     # Validation for argument combinations
-    if args.start_from_zero and (args.epoch_index is not None or args.time_index is not None):
-        parser.error("--start_from_zero cannot be used with --epoch_index or --time_index.")
+    if args.start_from_zero and (
+        args.epoch_index is not None or args.time_index is not None
+    ):
+        parser.error(
+            "--start_from_zero cannot be used with --epoch_index or --time_index."
+        )
 
     if args.time_index is not None and args.epoch_index is None:
         parser.error("--time_index can only be used if --epoch_index is specified.")
