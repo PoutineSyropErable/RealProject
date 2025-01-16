@@ -25,6 +25,22 @@ DEBUG_ = False
 # --------------------------------------------------------HELPER FUNCTIONS-----------------------------------------
 
 
+def get_finger_position(index: int) -> np.ndarray:
+    """
+    Retrieve the finger position based on the given index.
+
+    Parameters:
+        index (int): The index for the deformation scenario.
+
+    Returns:
+        np.ndarray: The finger position as a NumPy array.
+    """
+    FILTERED_POINTS_FILE = "./filtered_points_of_force_on_boundary.txt"
+    filtered_points = np.loadtxt(FILTERED_POINTS_FILE, skiprows=1)
+    finger_position = filtered_points[index]
+    return finger_position
+
+
 def load_file(filename: str) -> mesh.Mesh:
     # Load the mesh from the XDMF file
     with XDMFFile(MPI.COMM_WORLD, filename, "r") as xdmf:
@@ -48,7 +64,9 @@ def get_array_from_conn(conn) -> np.ndarray:
     offsets = conn.offsets
 
     # Convert the flat connectivity array into a list of arrays
-    connectivity_2d = [connectivity_array[start:end] for start, end in zip(offsets[:-1], offsets[1:])]
+    connectivity_2d = [
+        connectivity_array[start:end] for start, end in zip(offsets[:-1], offsets[1:])
+    ]
 
     # Convert to numpy array with dtype=object to handle variable-length rows
     return np.array(connectivity_2d, dtype=object)
@@ -68,7 +86,9 @@ def get_mesh(filename: str) -> Tuple[mesh.Mesh, np.ndarray, np.ndarray]:
 # -----------------------------------------------------    CODE STARTS --------------------------------------------
 
 
-def compute_estimate_dt_courant_limit(points: np.ndarray, connectivity: np.ndarray, E: float, rho: float, nu: float) -> float:
+def compute_estimate_dt_courant_limit(
+    points: np.ndarray, connectivity: np.ndarray, E: float, rho: float, nu: float
+) -> float:
     # Compute wave speed
     c = np.sqrt(E / rho / (1 - nu**2))
 
@@ -110,7 +130,11 @@ def compute_bounding_box(points: np.ndarray, connectivity: np.ndarray) -> int:
     print(f"number_cells = {num_cells}")
     num_nodes_per_cell = connectivity.shape[1]
     print(f"num_nodes_per_cell = {num_nodes_per_cell}")
-    cells = np.hstack([np.full((num_cells, 1), num_nodes_per_cell), connectivity]).flatten().astype(np.int32)
+    cells = (
+        np.hstack([np.full((num_cells, 1), num_nodes_per_cell), connectivity])
+        .flatten()
+        .astype(np.int32)
+    )
 
     # Check the shape and contents of the cells array
     print(f"Shape of cells array: {cells.shape}")
@@ -147,10 +171,16 @@ class PhysicalDeformationSimulation:
 
         tdim = domain.topology.dim  # 3D
         fdim = tdim - 1  # 2D
-        boundary_facets = mesh.locate_entities_boundary(domain, fdim, static_on_boundary_function)
+        boundary_facets = mesh.locate_entities_boundary(
+            domain, fdim, static_on_boundary_function
+        )
         boundary_dofs = fem.locate_dofs_topological(self.V, fdim, boundary_facets)
-        u_D = np.array([0, 0, 0], dtype=default_scalar_type)  # no displacement on boundary
-        self.bc = fem.dirichletbc(u_D, boundary_dofs, self.V)  # create a condition where u = 0 on z = 0
+        u_D = np.array(
+            [0, 0, 0], dtype=default_scalar_type
+        )  # no displacement on boundary
+        self.bc = fem.dirichletbc(
+            u_D, boundary_dofs, self.V
+        )  # create a condition where u = 0 on z = 0
 
         self.v = ufl.TestFunction(self.V)
         self.u_t = ufl.TrialFunction(self.V)
@@ -182,7 +212,9 @@ class PhysicalDeformationSimulation:
 
     def set_write_param(self, NUMBER_OF_STEPS_BETWEEN_WRITES: int, OUTPUT_FILE: str):
         self.NUMBER_OF_STEPS_BETWEEN_WRITES = NUMBER_OF_STEPS_BETWEEN_WRITES
-        self.NUMBER_OF_WRITES = (self.num_steps + NUMBER_OF_STEPS_BETWEEN_WRITES - 1) // NUMBER_OF_STEPS_BETWEEN_WRITES
+        self.NUMBER_OF_WRITES = (
+            self.num_steps + NUMBER_OF_STEPS_BETWEEN_WRITES - 1
+        ) // NUMBER_OF_STEPS_BETWEEN_WRITES
         print(f"NUMBER OF WRITES: {self.NUMBER_OF_WRITES}\n")
         self.write_index = 0
 
@@ -208,26 +240,44 @@ class PhysicalDeformationSimulation:
         A.assemble()
         self.solver.setOperators(A)
 
-    def set_finger_position(self, finger_position: np.ndarray, R: float, pressure: float):
+    def set_finger_position(
+        self, finger_position: np.ndarray, R: float, pressure: float
+    ):
         self.finger_position = finger_position
         self.R = R
-        p = fem.Constant(self.domain, PETSc.ScalarType(-pressure))  # Negative for compression
+        p = fem.Constant(
+            self.domain, PETSc.ScalarType(-pressure)
+        )  # Negative for compression
 
         # Get the point on the boundary who will be under pressure. (Near the "Finger")
         x = ufl.SpatialCoordinate(self.domain)
-        distance = ufl.sqrt((x[0] - finger_position[0]) ** 2 + (x[1] - finger_position[1]) ** 2 + (x[2] - finger_position[2]) ** 2)
-        is_under_pressure = ufl.conditional(ufl.lt(distance, R), 1.0, 0.0)  # If touching finger
+        distance = ufl.sqrt(
+            (x[0] - finger_position[0]) ** 2
+            + (x[1] - finger_position[1]) ** 2
+            + (x[2] - finger_position[2]) ** 2
+        )
+        is_under_pressure = ufl.conditional(
+            ufl.lt(distance, R), 1.0, 0.0
+        )  # If touching finger
 
         # Traction term
-        self.traction_term = is_under_pressure * p * ufl.dot(self.v, ufl.FacetNormal(self.domain)) * ufl.ds
-        self.L_CONSTANT = self.dt * ufl.inner(self.f, self.v) * ufl.dx + self.dt * self.traction_term
+        self.traction_term = (
+            is_under_pressure
+            * p
+            * ufl.dot(self.v, ufl.FacetNormal(self.domain))
+            * ufl.ds
+        )
+        self.L_CONSTANT = (
+            self.dt * ufl.inner(self.f, self.v) * ufl.dx + self.dt * self.traction_term
+        )
 
     def simulate_one_itteration(self, step):
         self.t += self.dt
 
         # Linear form
         L_changing = (
-            self.rho * ufl.inner(self.u_tn, self.v) * ufl.dx - self.dt * ufl.inner(self.sigma(self.u_n), self.epsilon(self.v)) * ufl.dx
+            self.rho * ufl.inner(self.u_tn, self.v) * ufl.dx
+            - self.dt * ufl.inner(self.sigma(self.u_n), self.epsilon(self.v)) * ufl.dx
         )
         L = self.L_CONSTANT + L_changing
 
@@ -268,10 +318,15 @@ class PhysicalDeformationSimulation:
                 return 1
 
             if self.write_index >= self.NUMBER_OF_WRITES:
-                print(f"Warning: write_index ({self.write_index}) exceeds NUMBER_OF_WRITES ({self.NUMBER_OF_WRITES})!")
+                print(
+                    f"Warning: write_index ({self.write_index}) exceeds NUMBER_OF_WRITES ({self.NUMBER_OF_WRITES})!"
+                )
                 return 2
 
-            if step == self.num_steps - 1 or (step % self.NUMBER_OF_STEPS_BETWEEN_WRITES) == 0:
+            if (
+                step == self.num_steps - 1
+                or (step % self.NUMBER_OF_STEPS_BETWEEN_WRITES) == 0
+            ):
                 print("-----------------------------------------------")
                 print(f"Time step {step+1}/{self.num_steps}, t = {self.t}")
 
@@ -296,12 +351,19 @@ class PhysicalDeformationSimulation:
         print("\n\n-----End of Simulation-----\n\n")  # Close the movie file
 
         # Save max_displacement_array to a file
-        output_file = os.path.join(DISPLACEMENT_NORMS_DIR, f"max_displacement_array_{index}.txt")
+        output_file = os.path.join(
+            DISPLACEMENT_NORMS_DIR, f"max_displacement_array_{index}.txt"
+        )
         np.savetxt(output_file, self.max_displacement_array, fmt="%.6f")
         print(f"Saved max displacement array to {output_file}")
 
 
-def main(index: int, finger_position: np.ndarray, OUTPUT_FILE: str, DISPLACEMENT_NORMS_DIR: str) -> int:
+def main(
+    index: int,
+    finger_position: np.ndarray,
+    OUTPUT_FILE: str,
+    DISPLACEMENT_NORMS_DIR: str,
+) -> int:
     # Material properties
     E = 5e3  # Young's modulus for rubber in Pascals (Pa)
     nu = 0.40  # Poisson's ratio
@@ -352,7 +414,9 @@ def main(index: int, finger_position: np.ndarray, OUTPUT_FILE: str, DISPLACEMENT
     # ------------------------------- FEM ------------------------------
 
     def epsilon(u):
-        return ufl.sym(ufl.grad(u))  # Equivalent to 0.5*(ufl.nabla_grad(u) + ufl.nabla_grad(u).T)
+        return ufl.sym(
+            ufl.grad(u)
+        )  # Equivalent to 0.5*(ufl.nabla_grad(u) + ufl.nabla_grad(u).T)
 
     def sigma(u: fem.Function):
         return lambda_ * ufl.nabla_div(u) * ufl.Identity(len(u)) + 2 * mu * epsilon(u)
@@ -362,7 +426,9 @@ def main(index: int, finger_position: np.ndarray, OUTPUT_FILE: str, DISPLACEMENT
     def grounded_bunny(x):
         return x[2] <= Z_GROUND
 
-    bunny_simulation = PhysicalDeformationSimulation(domain, grounded_bunny, epsilon, sigma)
+    bunny_simulation = PhysicalDeformationSimulation(
+        domain, grounded_bunny, epsilon, sigma
+    )
     bunny_simulation.set_time_param(t, T, dt, num_steps, dt_max)
 
     NUMBER_OF_STEPS_BETWEEN_WRITES: int = 100
@@ -386,19 +452,26 @@ if __name__ == "__main__":
     os.makedirs(DISPLACEMENT_NORMS_DIR, exist_ok=True)
 
     ### Argument parsing
-    parser = argparse.ArgumentParser(description="Simulate and save deformation of a bunny mesh.")
-    parser.add_argument("--index", type=int, required=True, help="Index of the deformation scenario.")
+    parser = argparse.ArgumentParser(
+        description="Simulate and save deformation of a bunny mesh."
+    )
+    parser.add_argument(
+        "--index", type=int, required=True, help="Index of the deformation scenario."
+    )
     parser.add_argument(
         "--finger_position",
         type=float,
         nargs=3,
-        required=True,
+        required=False,
         help="Finger position as x, y, z.",
     )
     args = parser.parse_args()
 
     index = args.index
-    finger_position = np.array(args.finger_position)
+    if args.finger_position is not None:
+        finger_position = np.array(args.finger_position)
+    else:
+        finger_position = get_finger_position(index)
 
     ### --- Where the simulation data u(X,t) is saved. u is displacment. X is world space coordinates of undeformed
     # output_directory = "deformed_bunny_files"

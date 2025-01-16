@@ -142,11 +142,11 @@ class MeshEncoder(nn.Module):
         latent_dim (int): Dimensionality of the latent vector.
     """
 
-    def __init__(self, input_dim: int = 9001, latent_dim: int = 256):
+    def __init__(self, input_dim: int = 9001, latent_dim: int = 64):
         super(MeshEncoder, self).__init__()
         self.fc1 = nn.Linear(input_dim, 128)
-        self.fc2 = nn.Linear(128, 256)
-        self.fc3 = nn.Linear(256, latent_dim)
+        self.fc2 = nn.Linear(128, 128)
+        self.fc3 = nn.Linear(128, latent_dim)
 
     def forward(self, vertices):
         """
@@ -173,9 +173,8 @@ class SDFCalculator(nn.Module):
     def __init__(self, latent_dim: int = 256, input_dim: int = 3):
         super(SDFCalculator, self).__init__()
         self.fc1 = nn.Linear(latent_dim + input_dim, 128)
-        self.fc2 = nn.Linear(128, 256)
-        self.fc3 = nn.Linear(256, 128)
-        self.fc4 = nn.Linear(128, 1)
+        self.fc2 = nn.Linear(128, 128)
+        self.fc3 = nn.Linear(128, 1)
 
     def forward(self, latent_vector, coordinates):
         """
@@ -193,8 +192,7 @@ class SDFCalculator(nn.Module):
         inputs = torch.cat([latent_repeated, coordinates], dim=-1)
         x = F.relu(self.fc1(inputs))
         x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        sdf_values = self.fc4(x)
+        sdf_values = self.fc3(x)
         return sdf_values
 
 
@@ -372,7 +370,11 @@ def train_model(
             lr=learning_rate,
         )
         training_context.scheduler = ReduceLROnPlateau(
-            training_context.optimizer, mode="min", factor=0.7, patience=4, verbose=True
+            training_context.optimizer,
+            mode="min",
+            factor=0.8,
+            patience=20,
+            verbose=True,
         )
 
     criterion = nn.MSELoss()
@@ -410,6 +412,7 @@ def train_model(
             training_context.optimizer.step()
 
             total_loss += loss.item()
+            training_context.scheduler.step(loss.item())
             # Custom logging for the learning rate
             current_lr = training_context.scheduler.get_last_lr()
             print(
@@ -436,7 +439,6 @@ def train_model(
 
         training_context.loss_tracker.append([])  # Add losses for this epoch
         # Step the scheduler
-        training_context.scheduler.step(total_loss)
         print(f" End of Epoch {epoch}/{epochs -1}, Loss: {total_loss}")
         # Handle stop epoch signal
         if stop_epoch_signal:

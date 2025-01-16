@@ -61,7 +61,9 @@ def get_array_from_conn(conn) -> np.ndarray:
     offsets = conn.offsets
 
     # Convert the flat connectivity array into a list of arrays
-    connectivity_2d = [connectivity_array[start:end] for start, end in zip(offsets[:-1], offsets[1:])]
+    connectivity_2d = [
+        connectivity_array[start:end] for start, end in zip(offsets[:-1], offsets[1:])
+    ]
 
     return np.array(connectivity_2d, dtype=object)
 
@@ -79,7 +81,9 @@ def get_mesh(filename: str) -> Tuple[mesh.Mesh, np.ndarray, np.ndarray]:
     domain = load_file(filename)
     points = domain.geometry.x  # Array of vertex coordinates
     conn = domain.topology.connectivity(3, 0)
-    connectivity = get_array_from_conn(conn).astype(np.int64)  # Convert to 2D numpy array
+    connectivity = get_array_from_conn(conn).astype(
+        np.int64
+    )  # Convert to 2D numpy array
 
     return domain, points, connectivity
 
@@ -100,14 +104,22 @@ def load_deformations(h5_file: str) -> Tuple[np.ndarray, np.ndarray]:
         f_group = function_group["f"]
 
         # Extract time steps and displacements
-        time_steps = np.array(sorted(f_group.keys(), key=lambda x: float(x)), dtype=float)
-        displacements = np.array([f_group[time_step][...] for time_step in f_group.keys()])
-        print(f"Loaded {len(time_steps)} time steps, Displacement tensor shape: {displacements.shape}")
+        time_steps = np.array(
+            sorted(f_group.keys(), key=lambda x: float(x)), dtype=float
+        )
+        displacements = np.array(
+            [f_group[time_step][...] for time_step in f_group.keys()]
+        )
+        print(
+            f"Loaded {len(time_steps)} time steps, Displacement tensor shape: {displacements.shape}"
+        )
 
     return time_steps, displacements
 
 
-def load_mesh_and_deformations(xdmf_file: str, h5_file: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def load_mesh_and_deformations(
+    xdmf_file: str, h5_file: str
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Load mesh points and deformation data.
 
@@ -168,12 +180,16 @@ def extract_boundary_info(domain) -> Tuple[np.ndarray, np.ndarray]:
     fdim = tdim - 1  # Facet dimension (boundary faces -> 2D)
 
     # Get facets on the boundary
-    boundary_facets = mesh.locate_entities_boundary(domain, fdim, lambda x: np.full(x.shape[1], True))
+    boundary_facets = mesh.locate_entities_boundary(
+        domain, fdim, lambda x: np.full(x.shape[1], True)
+    )
 
     # Step 2: Get facet-to-vertex connectivity
     facet_to_vertex = domain.topology.connectivity(fdim, 0)
     if facet_to_vertex is None:
-        raise ValueError("Facet-to-vertex connectivity not available. Ensure the mesh is initialized correctly.")
+        raise ValueError(
+            "Facet-to-vertex connectivity not available. Ensure the mesh is initialized correctly."
+        )
 
     # Map boundary facets to vertex indices
     boundary_faces = [facet_to_vertex.links(facet) for facet in boundary_facets]
@@ -183,7 +199,9 @@ def extract_boundary_info(domain) -> Tuple[np.ndarray, np.ndarray]:
 
     # Map original vertex indices to continuous indices (0-based for faces)
     vertex_map = {original: i for i, original in enumerate(boundary_vertices_index)}
-    faces = np.array([[vertex_map[v] for v in face] for face in boundary_faces], dtype=int)
+    faces = np.array(
+        [[vertex_map[v] for v in face] for face in boundary_faces], dtype=int
+    )
 
     return faces, boundary_vertices_index
 
@@ -226,7 +244,9 @@ def compute_enlarged_bounding_box(mesh_points: np.ndarray):
 
 
 class DistributionFunction:
-    def __init__(self, n: float, b: float, z_min: float, z_max: float, num_precompute: int = 1000):
+    def __init__(
+        self, n: float, b: float, z_min: float, z_max: float, num_precompute: int = 1000
+    ):
         """
         Initialize the distribution function f(z) = a * (z - z_min)^n + b.
         The constant `a` is normalized to make the PDF integrate to 1.
@@ -280,7 +300,9 @@ class DistributionFunction:
 
         # Check if normalization is possible
         if b * length > 1:
-            raise ValueError(f"Normalization not possible: b * (z_max - z_min) = {b * length} > 1")
+            raise ValueError(
+                f"Normalization not possible: b * (z_max - z_min) = {b * length} > 1"
+            )
 
         # Calculate normalization constant `a`
         integral_zn = (length ** (n + 1)) / (n + 1)
@@ -315,9 +337,13 @@ class DistributionFunction:
         z_calc = self.z_min
         for u in u_values:
             try:
-                z_calc = self._find_inverse_cdf(u, z_calc)  # Use previous z as the next initial guess
+                z_calc = self._find_inverse_cdf(
+                    u, z_calc
+                )  # Use previous z as the next initial guess
             except ValueError as e:
-                print(f"\033[31mError in precomputing inverse CDF for u={u}: {e}\033[0m")
+                print(
+                    f"\033[31mError in precomputing inverse CDF for u={u}: {e}\033[0m"
+                )
                 z_calc = self.z_min if u < 0.5 else self.z_max  # Fallback to bounds
             z_values.append(z_calc)
 
@@ -391,7 +417,12 @@ class DistributionFunction:
         return self._refine_inverse_cdf(u, initial_guess)
 
 
-def generate_random_points(b_min: np.ndarray, b_max: np.ndarray, num_points: int, distribution: "DistributionFunction"):
+def generate_random_points(
+    b_min: np.ndarray,
+    b_max: np.ndarray,
+    num_points: int,
+    distribution: "DistributionFunction",
+):
     """
     Generate random points within the bounding box, with z generated from a custom distribution.
 
@@ -418,8 +449,12 @@ def generate_random_points(b_min: np.ndarray, b_max: np.ndarray, num_points: int
         z_points = np.array([distribution.inverse_cdf(u) for u in uniform_samples])
     else:
         batch_size = 1000
-        num_batches = (num_points + batch_size - 1) // batch_size  # Total number of batches
-        print(f"        Starting computation of {num_points} z-points in {num_batches} batches of {batch_size}...")
+        num_batches = (
+            num_points + batch_size - 1
+        ) // batch_size  # Total number of batches
+        print(
+            f"        Starting computation of {num_points} z-points in {num_batches} batches of {batch_size}..."
+        )
 
         for batch_num, i in enumerate(range(0, num_points, batch_size), start=1):
             batch_start_time = time.time()
@@ -429,15 +464,21 @@ def generate_random_points(b_min: np.ndarray, b_max: np.ndarray, num_points: int
             batch_uniform_samples = uniform_samples[i:batch_end]
 
             # Compute z-points for the batch
-            z_points[i:batch_end] = [distribution.inverse_cdf(u) for u in batch_uniform_samples]
+            z_points[i:batch_end] = [
+                distribution.inverse_cdf(u) for u in batch_uniform_samples
+            ]
 
             # Log batch timing
             batch_time = time.time() - batch_start_time
-            print(f"        Processed batch {batch_num}/{num_batches}: {batch_end - i} points in {batch_time:.2f} seconds.")
+            print(
+                f"        Processed batch {batch_num}/{num_batches}: {batch_end - i} points in {batch_time:.2f} seconds."
+            )
 
     if DEBUG_TIMER:
         total_time = time.time() - start_time
-        print(f"    Finished generation of {num_points} points in {total_time:.2f} seconds.")
+        print(
+            f"    Finished generation of {num_points} points in {total_time:.2f} seconds."
+        )
 
     # Combine x, y, and z
     output = np.hstack([xy_points, z_points.reshape(-1, 1)])
@@ -449,9 +490,13 @@ def generate_random_points_old(b_min: np.ndarray, b_max: np.ndarray, num_points:
     return np.random.uniform(b_min, b_max, size=(num_points, 3))
 
 
-def compute_signed_distances(point_list: np.ndarray, mesh_points: np.ndarray, mesh_faces: np.ndarray):
+def compute_signed_distances(
+    point_list: np.ndarray, mesh_points: np.ndarray, mesh_faces: np.ndarray
+):
     """Compute signed distances from points to the triangle mesh."""
-    signed_distances, nearest_face, nearest_points = igl.signed_distance(point_list, mesh_points, mesh_faces)
+    signed_distances, nearest_face, nearest_points = igl.signed_distance(
+        point_list, mesh_points, mesh_faces
+    )
     return signed_distances, nearest_face, nearest_points
 
 
@@ -470,11 +515,19 @@ def filter_function(signed_distance: float, weight_exponent: float) -> bool:
 def filter_points(signed_distances: np.ndarray, weight_exponent: float) -> np.ndarray:
     """Filter points based on their signed distances."""
 
-    filtered_index = np.array([i for i in range(len(signed_distances)) if filter_function(signed_distances[i], weight_exponent)])
+    filtered_index = np.array(
+        [
+            i
+            for i in range(len(signed_distances))
+            if filter_function(signed_distances[i], weight_exponent)
+        ]
+    )
     return filtered_index
 
 
-def generate_sdf_points_from_boundary_points(NUM_POINTS, deformed_boundary_points_t, n, b):
+def generate_sdf_points_from_boundary_points(
+    NUM_POINTS, deformed_boundary_points_t, n, b
+):
     """f = a*z^n + b
     a is calculated so int_min^max f dz = 1"""
 
@@ -591,7 +644,14 @@ def plot_histograms_with_function(point_list, b_min, b_max, n, b):
         bin_width = bin_edges[1] - bin_edges[0]
 
         # Plot the histogram
-        ax.hist(data[i], bins=50, range=bounds[i], alpha=0.7, color="blue", label=f"Histogram of {labels[i]}")
+        ax.hist(
+            data[i],
+            bins=50,
+            range=bounds[i],
+            alpha=0.7,
+            color="blue",
+            label=f"Histogram of {labels[i]}",
+        )
         ax.set_title(f"{labels[i]} Histogram", fontsize=14)
         ax.set_xlabel(labels[i], fontsize=12)
         ax.set_ylabel("Frequency", fontsize=12)
@@ -600,19 +660,43 @@ def plot_histograms_with_function(point_list, b_min, b_max, n, b):
         if labels[i] == "z":
             # Scale f_values to match histogram scale
             f_values_scaled = f_values * len(z) * bin_width
-            ax.plot(z_values, f_values_scaled, color="red", label=r"$f(z) = a(z - z_{min})^n + b$", linewidth=2)
+            ax.plot(
+                z_values,
+                f_values_scaled,
+                color="red",
+                label=r"$f(z) = a(z - z_{min})^n + b$",
+                linewidth=2,
+            )
             ax.legend(fontsize=10)
 
         # Add bounds as vertical lines
-        ax.axvline(bounds[i][0], color="green", linestyle="--", linewidth=1.5, label=f"{labels[i]} min")
-        ax.axvline(bounds[i][1], color="red", linestyle="--", linewidth=1.5, label=f"{labels[i]} max")
+        ax.axvline(
+            bounds[i][0],
+            color="green",
+            linestyle="--",
+            linewidth=1.5,
+            label=f"{labels[i]} min",
+        )
+        ax.axvline(
+            bounds[i][1],
+            color="red",
+            linestyle="--",
+            linewidth=1.5,
+            label=f"{labels[i]} max",
+        )
         ax.legend()
 
     plt.tight_layout()
     plt.show()
 
 
-def draw_bounding_box(b_min: np.ndarray, b_max: np.ndarray, name: str, color: tuple = (0.0, 1.0, 0.0), radius: float = 0.002):
+def draw_bounding_box(
+    b_min: np.ndarray,
+    b_max: np.ndarray,
+    name: str,
+    color: tuple = (0.0, 1.0, 0.0),
+    radius: float = 0.002,
+):
     """Draw a bounding box in Polyscope given min and max points."""
     # Create corners of the bounding box
     box_corners = np.array(
@@ -679,34 +763,48 @@ def visualize_mesh_with_points(mesh_points, mesh_faces, sdf_points):
     ps_mesh = ps.register_surface_mesh("Mesh", temp_mesh_points, mesh_faces)
 
     # Register the SDF points
-    ps_sdf_points = ps.register_point_cloud("SDF Points", temp_sdf_points, radius=0.0025)
+    ps_sdf_points = ps.register_point_cloud(
+        "SDF Points", temp_sdf_points, radius=0.0025
+    )
     ps_sdf_points.set_color((1.0, 0.0, 0.0))  # Red for SDF points
 
     # Draw bounding boxes
-    draw_bounding_box(b_min, b_max, "Large Bounding Box", color=(0.0, 1.0, 0.0), radius=0.002)
-    draw_bounding_box(small_b_min, small_b_max, "Small Bounding Box", color=(0.0, 0.0, 1.0), radius=0.001)
+    draw_bounding_box(
+        b_min, b_max, "Large Bounding Box", color=(0.0, 1.0, 0.0), radius=0.002
+    )
+    draw_bounding_box(
+        small_b_min,
+        small_b_max,
+        "Small Bounding Box",
+        color=(0.0, 0.0, 1.0),
+        radius=0.001,
+    )
 
     # Show Polyscope
     ps.show()
 
 
-def main(INDEX, SDF_ONLY, REPLACE):
+def main(INDEX, SDF_ONLY, REPLACE, VALIDATE):
     print(f"\n\n{'-'*10} Start of Program{'-'*10}\n\n")
 
     # Input files
     DISPLACEMENT_FILE = f"{DISPLACMENT_DIR}/displacement_{INDEX}.h5"
-    OUTPUT_FILE = f"{OUTPUT_DIR}/sdf_points_{INDEX}{'_sdf_only' if SDF_ONLY else ''}.h5"
+    OUTPUT_FILE = f"{OUTPUT_DIR}/sdf_points_{INDEX}{'_sdf_only' if SDF_ONLY else ''}{'_validate' if VALIDATE else ''}.h5"
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     if os.path.isfile(OUTPUT_FILE):
         if REPLACE:
             os.remove(OUTPUT_FILE)
         else:
-            print(f"The file {OUTPUT_FILE} already exist. The sdf and points were already calculated")
+            print(
+                f"The file {OUTPUT_FILE} already exist. The sdf and points were already calculated"
+            )
             print(f"So, we won't calculate it. Skipping calculation and exiting (5)")
             return 5
 
-    points, connectivity, time_steps, deformations = load_mesh_and_deformations(xdmf_file=BUNNY_FILE, h5_file=DISPLACEMENT_FILE)
+    points, connectivity, time_steps, deformations = load_mesh_and_deformations(
+        xdmf_file=BUNNY_FILE, h5_file=DISPLACEMENT_FILE
+    )
     print(f"np.shape(points) = {np.shape(points)}")
     print(f"np.shape(connectivity) = {np.shape(connectivity)}")
     print(f"np.shape(time_steps) = {np.shape(time_steps)}")
@@ -741,19 +839,31 @@ def main(INDEX, SDF_ONLY, REPLACE):
             # Deform points using displacement
             # Compute signed distances
             # deformed_boundary_points[t_index] is the vertex of the surface mesh (.obj style) of the deformed bunny
-            point_list = generate_sdf_points_from_boundary_points(NUM_POINTS, deformed_boundary_points[t_index], n=Z_EXPONENT, b=Z_OFFSET)
+            point_list = generate_sdf_points_from_boundary_points(
+                NUM_POINTS, deformed_boundary_points[t_index], n=Z_EXPONENT, b=Z_OFFSET
+            )
             print(f"\n    type(point_list) = {type(point_list)}")
             print(f"    np.shape(point_list) = {np.shape(point_list)}")
             print(f"    point_list = \n{point_list}\n")
 
-            b_min, b_max = compute_enlarged_bounding_box(deformed_boundary_points[t_index])
+            b_min, b_max = compute_enlarged_bounding_box(
+                deformed_boundary_points[t_index]
+            )
             print(f"    Bounding box:\n    Min: {b_min}\n    Max: {b_max}\n")
 
             if DEBUG_:
-                plot_histograms_with_function(point_list, b_min, b_max, Z_EXPONENT, Z_OFFSET)
-                visualize_mesh_with_points(deformed_boundary_points[t_index], faces, point_list[0:NUMBER_OF_POINTS_IN_VISUALISATION])
+                plot_histograms_with_function(
+                    point_list, b_min, b_max, Z_EXPONENT, Z_OFFSET
+                )
+                visualize_mesh_with_points(
+                    deformed_boundary_points[t_index],
+                    faces,
+                    point_list[0:NUMBER_OF_POINTS_IN_VISUALISATION],
+                )
                 exit(0)
-            signed_distances, _, _ = compute_signed_distances(point_list, deformed_boundary_points[t_index], faces)
+            signed_distances, _, _ = compute_signed_distances(
+                point_list, deformed_boundary_points[t_index], faces
+            )
             print(f"obtained signed distances")
 
             # Filter points based on signed distances
@@ -763,10 +873,14 @@ def main(INDEX, SDF_ONLY, REPLACE):
             filtered_signed_distances = signed_distances[filtered_index]
             print(f"np.shape(filtered_points) = {np.shape(filtered_points)}")
             print(f"np.shape(signed_distances) = {np.shape(signed_distances)}")
-            print(f"np.shape(filtered_signed_distances) = {np.shape(filtered_signed_distances)}")
+            print(
+                f"np.shape(filtered_signed_distances) = {np.shape(filtered_signed_distances)}"
+            )
 
             # Combine points and signed distances
-            sdf_with_points = np.hstack((filtered_points, filtered_signed_distances[:, None]))
+            sdf_with_points = np.hstack(
+                (filtered_points, filtered_signed_distances[:, None])
+            )
             f.create_dataset(f"time_{t_index}", data=sdf_with_points)
 
             print(f"Processed time step {t_index}/{len(time_steps) -1}")
@@ -781,17 +895,27 @@ def main(INDEX, SDF_ONLY, REPLACE):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Calculate SDF for deformed meshes.")
-    parser.add_argument("--index", type=int, required=True, help="Index of the deformation file.")
-    parser.add_argument("--sdf_only", action="store_true", help="Only save the SDF values.")
     parser.add_argument(
-        "--replace", action="store_true", help="Recalculate the sdf if it already is calculated, and replace the output file"
+        "--index", type=int, required=True, help="Index of the deformation file."
+    )
+    parser.add_argument(
+        "--sdf_only", action="store_true", help="Only save the SDF values."
+    )
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="Recalculate the sdf if it already is calculated, and replace the output file",
+    )
+    parser.add_argument(
+        "--validate", action="store_true", help="Generate points for validation"
     )
     args = parser.parse_args()
 
     INDEX = args.index
     SDF_ONLY = args.sdf_only
     REPLACE = args.replace
+    VALIDATE = args.validate
     print(f"\n\n{'-' * 10} Processing INDEX: {INDEX} {'-' * 10}\n\n")
     print(f"SDF only mode: {'Enabled' if SDF_ONLY else 'Disabled'}")
-    ret = main(INDEX, SDF_ONLY, REPLACE)
+    ret = main(INDEX, SDF_ONLY, REPLACE, VALIDATE)
     exit(ret)
