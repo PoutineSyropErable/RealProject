@@ -25,3 +25,4 @@ main/Animations/
 main/calculated_sdf/
 main/displacement_norms/
 main/sdf_points_filtered.h5
+main/training_data/

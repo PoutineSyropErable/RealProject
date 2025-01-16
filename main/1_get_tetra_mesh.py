@@ -68,7 +68,9 @@ print("Mesh path = {mesh_file}\n")
 print("Mesh = (points, connectivity)\n")
 
 print(f"type(points) = {type(points)}")
+print(f"points.dtype = {points.dtype}")
 print(f"type(connectivity) = {type(connectivity)}\n")
+print(f"connectivity.dtype = {connectivity.dtype}")
 
 print(f"shape(points) = {np.shape(points)}")
 print(f"shape(connectivity) = {np.shape(connectivity)}\n\n")

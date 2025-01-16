@@ -4,8 +4,8 @@ import numpy as np
 import subprocess
 
 # Directories
-DISPLACEMENT_DIR = "./deformed_bunny_files"
-ANIMATION_DIR = "./Animations"
+DISPLACEMENT_DIR = "./deformed_bunny_files_tunned"
+ANIMATION_DIR = "./Animations_tunned"
 VALID_INDICES_FILE = "filtered_not_buggy_deformed_indices.txt"
 BUGGY_INDICES_FILE = "filtered_buggy_deformed_indices.txt"
 
@@ -17,8 +17,9 @@ ANIMATION_SCRIPT = "./6_create_animation.py"
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Create animations for deformation scenarios.")
-parser.add_argument("--filter", type=str, choices=["valid", "buggy", "all"], default="all", 
-                    help="Filter option: valid, buggy, or all. Default is all.")
+parser.add_argument(
+    "--filter", type=str, choices=["valid", "buggy", "all"], default="all", help="Filter option: valid, buggy, or all. Default is all."
+)
 parser.add_argument("--replace", action="store_true", help="Replace existing animations.")
 parser.add_argument("--doall", action="store_true", help="Use all files from the directory regardless of filter.")
 args = parser.parse_args()
@@ -54,16 +55,16 @@ if not indices_to_process:
 # Iterate over indices and create animations
 for index in indices_to_process:
     animation_file = os.path.join(ANIMATION_DIR, f"bunny_deformation_animation_{index}.mp4")
-    
+
     # Skip if animation already exists and --replace is not specified
     if not args.replace and os.path.exists(animation_file):
         print(f"Skipping index {index}: Animation already exists.")
         continue
-    
+
     # Command to generate the animation
     command = ["python", ANIMATION_SCRIPT, "--index", str(index), "--offscreen"]
     print(f"Creating animation for index {index}...")
-    
+
     try:
         subprocess.run(command, check=True)
         print(f"Animation for index {index} created successfully.\n")
@@ -72,4 +73,3 @@ for index in indices_to_process:
         continue
 
 print("All animations processed.")
-
