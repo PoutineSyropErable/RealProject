@@ -64,9 +64,7 @@ def get_array_from_conn(conn) -> np.ndarray:
     offsets = conn.offsets
 
     # Convert the flat connectivity array into a list of arrays
-    connectivity_2d = [
-        connectivity_array[start:end] for start, end in zip(offsets[:-1], offsets[1:])
-    ]
+    connectivity_2d = [connectivity_array[start:end] for start, end in zip(offsets[:-1], offsets[1:])]
 
     # Convert to numpy array with dtype=object to handle variable-length rows
     return np.array(connectivity_2d, dtype=object)
@@ -86,9 +84,7 @@ def get_mesh(filename: str) -> Tuple[mesh.Mesh, np.ndarray, np.ndarray]:
 # -----------------------------------------------------    CODE STARTS --------------------------------------------
 
 
-def compute_estimate_dt_courant_limit(
-    points: np.ndarray, connectivity: np.ndarray, E: float, rho: float, nu: float
-) -> float:
+def compute_estimate_dt_courant_limit(points: np.ndarray, connectivity: np.ndarray, E: float, rho: float, nu: float) -> float:
     # Compute wave speed
     c = np.sqrt(E / rho / (1 - nu**2))
 
@@ -121,24 +117,18 @@ def compute_bounding_box(points: np.ndarray, connectivity: np.ndarray) -> int:
 
     center = (pos_min + pos_max) / 2
     bbox_size = pos_max - pos_min
-    print(f"center = {center}")
-    print(f"bbox_size = {bbox_size}")
 
     # Calculate volume
     # PyVista requires a `cells` array where the first value is the number of nodes per cell
     num_cells = connectivity.shape[0]
-    print(f"number_cells = {num_cells}")
+    print(f"\nnumber_cells = {num_cells}")
     num_nodes_per_cell = connectivity.shape[1]
-    print(f"num_nodes_per_cell = {num_nodes_per_cell}")
-    cells = (
-        np.hstack([np.full((num_cells, 1), num_nodes_per_cell), connectivity])
-        .flatten()
-        .astype(np.int32)
-    )
+    print(f"num_nodes_per_cell = {num_nodes_per_cell}\n")
+    cells = np.hstack([np.full((num_cells, 1), num_nodes_per_cell), connectivity]).flatten().astype(np.int32)
 
     # Check the shape and contents of the cells array
     print(f"Shape of cells array: {cells.shape}")
-    print(f"First 20 elements of cells array: {cells[:20]}")
+    print(f"First 20 elements of cells array: {cells[:20]}\n")
 
     # Cell types: 10 corresponds to tetrahedrons in PyVista
     cell_type = np.full(num_cells, 10, dtype=np.uint8)
@@ -147,10 +137,18 @@ def compute_bounding_box(points: np.ndarray, connectivity: np.ndarray) -> int:
     tetra_grid = pv.UnstructuredGrid(cells, cell_type, points)
     # Calculate the volume
     volume = tetra_grid.volume
-    print(f"Volume of tetrahedral mesh: {volume}")
 
     estimate_avg_cell_size = np.cbrt(volume / num_cells)
-    print(f"estimate_avg_cell_size = {estimate_avg_cell_size}")
+    print(f"estimate_avg_cell_size = {estimate_avg_cell_size}\n")
+
+    print(f"center = {center}")
+    print(f"bbox_size = {bbox_size}\n")
+    print(f"Volume of tetrahedral mesh: {volume}")
+    bbox_volume = bbox_size[0] * bbox_size[1] * bbox_size[2]
+    print(f"Volume of Bbox: {bbox_volume}")
+    print(f"ratio: {volume/bbox_volume}")
+
+    print("\n")
 
     return 0
 
@@ -171,16 +169,10 @@ class PhysicalDeformationSimulation:
 
         tdim = domain.topology.dim  # 3D
         fdim = tdim - 1  # 2D
-        boundary_facets = mesh.locate_entities_boundary(
-            domain, fdim, static_on_boundary_function
-        )
+        boundary_facets = mesh.locate_entities_boundary(domain, fdim, static_on_boundary_function)
         boundary_dofs = fem.locate_dofs_topological(self.V, fdim, boundary_facets)
-        u_D = np.array(
-            [0, 0, 0], dtype=default_scalar_type
-        )  # no displacement on boundary
-        self.bc = fem.dirichletbc(
-            u_D, boundary_dofs, self.V
-        )  # create a condition where u = 0 on z = 0
+        u_D = np.array([0, 0, 0], dtype=default_scalar_type)  # no displacement on boundary
+        self.bc = fem.dirichletbc(u_D, boundary_dofs, self.V)  # create a condition where u = 0 on z = 0
 
         self.v = ufl.TestFunction(self.V)
         self.u_t = ufl.TrialFunction(self.V)
@@ -212,9 +204,7 @@ class PhysicalDeformationSimulation:
 
     def set_write_param(self, NUMBER_OF_STEPS_BETWEEN_WRITES: int, OUTPUT_FILE: str):
         self.NUMBER_OF_STEPS_BETWEEN_WRITES = NUMBER_OF_STEPS_BETWEEN_WRITES
-        self.NUMBER_OF_WRITES = (
-            self.num_steps + NUMBER_OF_STEPS_BETWEEN_WRITES - 1
-        ) // NUMBER_OF_STEPS_BETWEEN_WRITES
+        self.NUMBER_OF_WRITES = (self.num_steps + NUMBER_OF_STEPS_BETWEEN_WRITES - 1) // NUMBER_OF_STEPS_BETWEEN_WRITES
         print(f"NUMBER OF WRITES: {self.NUMBER_OF_WRITES}\n")
         self.write_index = 0
 
@@ -240,44 +230,26 @@ class PhysicalDeformationSimulation:
         A.assemble()
         self.solver.setOperators(A)
 
-    def set_finger_position(
-        self, finger_position: np.ndarray, R: float, pressure: float
-    ):
+    def set_finger_position(self, finger_position: np.ndarray, R: float, pressure: float):
         self.finger_position = finger_position
         self.R = R
-        p = fem.Constant(
-            self.domain, PETSc.ScalarType(-pressure)
-        )  # Negative for compression
+        p = fem.Constant(self.domain, PETSc.ScalarType(-pressure))  # Negative for compression
 
         # Get the point on the boundary who will be under pressure. (Near the "Finger")
         x = ufl.SpatialCoordinate(self.domain)
-        distance = ufl.sqrt(
-            (x[0] - finger_position[0]) ** 2
-            + (x[1] - finger_position[1]) ** 2
-            + (x[2] - finger_position[2]) ** 2
-        )
-        is_under_pressure = ufl.conditional(
-            ufl.lt(distance, R), 1.0, 0.0
-        )  # If touching finger
+        distance = ufl.sqrt((x[0] - finger_position[0]) ** 2 + (x[1] - finger_position[1]) ** 2 + (x[2] - finger_position[2]) ** 2)
+        is_under_pressure = ufl.conditional(ufl.lt(distance, R), 1.0, 0.0)  # If touching finger
 
         # Traction term
-        self.traction_term = (
-            is_under_pressure
-            * p
-            * ufl.dot(self.v, ufl.FacetNormal(self.domain))
-            * ufl.ds
-        )
-        self.L_CONSTANT = (
-            self.dt * ufl.inner(self.f, self.v) * ufl.dx + self.dt * self.traction_term
-        )
+        self.traction_term = is_under_pressure * p * ufl.dot(self.v, ufl.FacetNormal(self.domain)) * ufl.ds
+        self.L_CONSTANT = self.dt * ufl.inner(self.f, self.v) * ufl.dx + self.dt * self.traction_term
 
     def simulate_one_itteration(self, step):
         self.t += self.dt
 
         # Linear form
         L_changing = (
-            self.rho * ufl.inner(self.u_tn, self.v) * ufl.dx
-            - self.dt * ufl.inner(self.sigma(self.u_n), self.epsilon(self.v)) * ufl.dx
+            self.rho * ufl.inner(self.u_tn, self.v) * ufl.dx - self.dt * ufl.inner(self.sigma(self.u_n), self.epsilon(self.v)) * ufl.dx
         )
         L = self.L_CONSTANT + L_changing
 
@@ -318,15 +290,10 @@ class PhysicalDeformationSimulation:
                 return 1
 
             if self.write_index >= self.NUMBER_OF_WRITES:
-                print(
-                    f"Warning: write_index ({self.write_index}) exceeds NUMBER_OF_WRITES ({self.NUMBER_OF_WRITES})!"
-                )
+                print(f"Warning: write_index ({self.write_index}) exceeds NUMBER_OF_WRITES ({self.NUMBER_OF_WRITES})!")
                 return 2
 
-            if (
-                step == self.num_steps - 1
-                or (step % self.NUMBER_OF_STEPS_BETWEEN_WRITES) == 0
-            ):
+            if step == self.num_steps - 1 or (step % self.NUMBER_OF_STEPS_BETWEEN_WRITES) == 0:
                 print("-----------------------------------------------")
                 print(f"Time step {step+1}/{self.num_steps}, t = {self.t}")
 
@@ -351,9 +318,7 @@ class PhysicalDeformationSimulation:
         print("\n\n-----End of Simulation-----\n\n")  # Close the movie file
 
         # Save max_displacement_array to a file
-        output_file = os.path.join(
-            DISPLACEMENT_NORMS_DIR, f"max_displacement_array_{index}.txt"
-        )
+        output_file = os.path.join(DISPLACEMENT_NORMS_DIR, f"max_displacement_array_{index}.txt")
         np.savetxt(output_file, self.max_displacement_array, fmt="%.6f")
         print(f"Saved max displacement array to {output_file}")
 
@@ -387,6 +352,8 @@ def main(
         print(f"connectivity = \n{connectivity}\n")
         print("connectivity.dtype =", connectivity.dtype)
 
+    compute_bounding_box(points, connectivity)
+
     # Time parameters
     t = 0.0
     T = 0.01  # Total simulation time
@@ -414,9 +381,7 @@ def main(
     # ------------------------------- FEM ------------------------------
 
     def epsilon(u):
-        return ufl.sym(
-            ufl.grad(u)
-        )  # Equivalent to 0.5*(ufl.nabla_grad(u) + ufl.nabla_grad(u).T)
+        return ufl.sym(ufl.grad(u))  # Equivalent to 0.5*(ufl.nabla_grad(u) + ufl.nabla_grad(u).T)
 
     def sigma(u: fem.Function):
         return lambda_ * ufl.nabla_div(u) * ufl.Identity(len(u)) + 2 * mu * epsilon(u)
@@ -426,9 +391,7 @@ def main(
     def grounded_bunny(x):
         return x[2] <= Z_GROUND
 
-    bunny_simulation = PhysicalDeformationSimulation(
-        domain, grounded_bunny, epsilon, sigma
-    )
+    bunny_simulation = PhysicalDeformationSimulation(domain, grounded_bunny, epsilon, sigma)
     bunny_simulation.set_time_param(t, T, dt, num_steps, dt_max)
 
     NUMBER_OF_STEPS_BETWEEN_WRITES: int = 100
@@ -452,12 +415,8 @@ if __name__ == "__main__":
     os.makedirs(DISPLACEMENT_NORMS_DIR, exist_ok=True)
 
     ### Argument parsing
-    parser = argparse.ArgumentParser(
-        description="Simulate and save deformation of a bunny mesh."
-    )
-    parser.add_argument(
-        "--index", type=int, required=True, help="Index of the deformation scenario."
-    )
+    parser = argparse.ArgumentParser(description="Simulate and save deformation of a bunny mesh.")
+    parser.add_argument("--index", type=int, required=True, help="Index of the deformation scenario.")
     parser.add_argument(
         "--finger_position",
         type=float,

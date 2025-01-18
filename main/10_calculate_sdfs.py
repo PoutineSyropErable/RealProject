@@ -13,9 +13,11 @@ import time
 import matplotlib.pyplot as plt
 import polyscope as ps
 
-DEBUG_ = False
-DEBUG_TIMER = True
+DEBUG_ = True
+DEBUG_TIMER = False
 os.chdir(sys.path[0])
+
+BOX_RATIO = 1.5
 
 NUM_POINTS = 1_000_000
 NUM_PRECOMPUTED_CDF = 1000  # Dont make this too big
@@ -61,9 +63,7 @@ def get_array_from_conn(conn) -> np.ndarray:
     offsets = conn.offsets
 
     # Convert the flat connectivity array into a list of arrays
-    connectivity_2d = [
-        connectivity_array[start:end] for start, end in zip(offsets[:-1], offsets[1:])
-    ]
+    connectivity_2d = [connectivity_array[start:end] for start, end in zip(offsets[:-1], offsets[1:])]
 
     return np.array(connectivity_2d, dtype=object)
 
@@ -81,9 +81,7 @@ def get_mesh(filename: str) -> Tuple[mesh.Mesh, np.ndarray, np.ndarray]:
     domain = load_file(filename)
     points = domain.geometry.x  # Array of vertex coordinates
     conn = domain.topology.connectivity(3, 0)
-    connectivity = get_array_from_conn(conn).astype(
-        np.int64
-    )  # Convert to 2D numpy array
+    connectivity = get_array_from_conn(conn).astype(np.int64)  # Convert to 2D numpy array
 
     return domain, points, connectivity
 
@@ -104,22 +102,14 @@ def load_deformations(h5_file: str) -> Tuple[np.ndarray, np.ndarray]:
         f_group = function_group["f"]
 
         # Extract time steps and displacements
-        time_steps = np.array(
-            sorted(f_group.keys(), key=lambda x: float(x)), dtype=float
-        )
-        displacements = np.array(
-            [f_group[time_step][...] for time_step in f_group.keys()]
-        )
-        print(
-            f"Loaded {len(time_steps)} time steps, Displacement tensor shape: {displacements.shape}"
-        )
+        time_steps = np.array(sorted(f_group.keys(), key=lambda x: float(x)), dtype=float)
+        displacements = np.array([f_group[time_step][...] for time_step in f_group.keys()])
+        print(f"Loaded {len(time_steps)} time steps, Displacement tensor shape: {displacements.shape}")
 
     return time_steps, displacements
 
 
-def load_mesh_and_deformations(
-    xdmf_file: str, h5_file: str
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def load_mesh_and_deformations(xdmf_file: str, h5_file: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Load mesh points and deformation data.
 
@@ -180,16 +170,12 @@ def extract_boundary_info(domain) -> Tuple[np.ndarray, np.ndarray]:
     fdim = tdim - 1  # Facet dimension (boundary faces -> 2D)
 
     # Get facets on the boundary
-    boundary_facets = mesh.locate_entities_boundary(
-        domain, fdim, lambda x: np.full(x.shape[1], True)
-    )
+    boundary_facets = mesh.locate_entities_boundary(domain, fdim, lambda x: np.full(x.shape[1], True))
 
     # Step 2: Get facet-to-vertex connectivity
     facet_to_vertex = domain.topology.connectivity(fdim, 0)
     if facet_to_vertex is None:
-        raise ValueError(
-            "Facet-to-vertex connectivity not available. Ensure the mesh is initialized correctly."
-        )
+        raise ValueError("Facet-to-vertex connectivity not available. Ensure the mesh is initialized correctly.")
 
     # Map boundary facets to vertex indices
     boundary_faces = [facet_to_vertex.links(facet) for facet in boundary_facets]
@@ -199,9 +185,7 @@ def extract_boundary_info(domain) -> Tuple[np.ndarray, np.ndarray]:
 
     # Map original vertex indices to continuous indices (0-based for faces)
     vertex_map = {original: i for i, original in enumerate(boundary_vertices_index)}
-    faces = np.array(
-        [[vertex_map[v] for v in face] for face in boundary_faces], dtype=int
-    )
+    faces = np.array([[vertex_map[v] for v in face] for face in boundary_faces], dtype=int)
 
     return faces, boundary_vertices_index
 
@@ -234,7 +218,6 @@ def compute_enlarged_bounding_box(mesh_points: np.ndarray):
     b_min = mesh_points.min(axis=0)
     b_max = mesh_points.max(axis=0)
 
-    BOX_RATIO = 1.5
     center = (b_min + b_max) / 2
     half_lengths = (b_max - b_min) / 2 * BOX_RATIO
     b_min = center - half_lengths
@@ -243,10 +226,70 @@ def compute_enlarged_bounding_box(mesh_points: np.ndarray):
     return b_min, b_max
 
 
+def compute_bounding_box_and_volume(points: np.ndarray, connectivity: np.ndarray) -> tuple:
+    """
+    Compute the volume of the tetrahedral mesh and its bounding box.
+
+    Args:
+        points (np.ndarray): An array of shape (n_points, 3) representing the 3D points.
+        connectivity (np.ndarray): An array of shape (n_cells, nodes_per_cell) representing the connectivity.
+
+    Returns:
+        tuple: A tuple containing the volume of the mesh and the volume of the bounding box.
+    """
+    # Get the min and max for each column
+    x_min, x_max = points[:, 0].min(), points[:, 0].max()
+    y_min, y_max = points[:, 1].min(), points[:, 1].max()
+    z_min, z_max = points[:, 2].min(), points[:, 2].max()
+
+    pos_min = np.array([x_min, y_min, z_min])
+    pos_max = np.array([x_max, y_max, z_max])
+
+    center = (pos_min + pos_max) / 2
+    bbox_size = pos_max - pos_min
+    print(f"Center of bounding box: {center}")
+    print(f"Bounding box size: {bbox_size}")
+
+    # Calculate the bounding box volume
+    bbox_volume = bbox_size[0] * bbox_size[1] * bbox_size[2]
+    print(f"Bounding box volume: {bbox_volume}")
+
+    # Calculate volume of the mesh
+    # PyVista requires a `cells` array where the first value is the number of nodes per cell
+    num_cells = connectivity.shape[0]
+    print(f"Number of cells: {num_cells}")
+    num_nodes_per_cell = connectivity.shape[1]
+    print(f"Number of nodes per cell: {num_nodes_per_cell}")
+
+    cells = np.hstack([np.full((num_cells, 1), num_nodes_per_cell), connectivity]).flatten().astype(np.int32)
+
+    # Check the shape and contents of the cells array
+    print(f"Shape of cells array: {cells.shape}")
+    print(f"First 20 elements of cells array: {cells[:20]}")
+
+    # Cell types: 10 corresponds to tetrahedrons in PyVista
+    cell_type = np.full(num_cells, 10, dtype=np.uint8)
+
+    # Create the PyVista UnstructuredGrid
+    tetra_grid = pv.UnstructuredGrid(cells, cell_type, points)
+
+    # Calculate the volume
+    mesh_volume = tetra_grid.volume
+    print(f"Volume of tetrahedral mesh: {mesh_volume}")
+
+    # Estimate the average cell size
+    if num_cells > 0:
+        estimate_avg_cell_size = np.cbrt(mesh_volume / num_cells)
+        print(f"Estimated average cell size: {estimate_avg_cell_size}")
+    else:
+        print("No cells found in the mesh. Cannot estimate cell size.")
+        estimate_avg_cell_size = None
+
+    return mesh_volume, bbox_volume
+
+
 class DistributionFunction:
-    def __init__(
-        self, n: float, b: float, z_min: float, z_max: float, num_precompute: int = 1000
-    ):
+    def __init__(self, n: float, b: float, z_min: float, z_max: float, num_precompute: int = 1000):
         """
         Initialize the distribution function f(z) = a * (z - z_min)^n + b.
         The constant `a` is normalized to make the PDF integrate to 1.
@@ -300,9 +343,7 @@ class DistributionFunction:
 
         # Check if normalization is possible
         if b * length > 1:
-            raise ValueError(
-                f"Normalization not possible: b * (z_max - z_min) = {b * length} > 1"
-            )
+            raise ValueError(f"Normalization not possible: b * (z_max - z_min) = {b * length} > 1")
 
         # Calculate normalization constant `a`
         integral_zn = (length ** (n + 1)) / (n + 1)
@@ -337,13 +378,9 @@ class DistributionFunction:
         z_calc = self.z_min
         for u in u_values:
             try:
-                z_calc = self._find_inverse_cdf(
-                    u, z_calc
-                )  # Use previous z as the next initial guess
+                z_calc = self._find_inverse_cdf(u, z_calc)  # Use previous z as the next initial guess
             except ValueError as e:
-                print(
-                    f"\033[31mError in precomputing inverse CDF for u={u}: {e}\033[0m"
-                )
+                print(f"\033[31mError in precomputing inverse CDF for u={u}: {e}\033[0m")
                 z_calc = self.z_min if u < 0.5 else self.z_max  # Fallback to bounds
             z_values.append(z_calc)
 
@@ -449,12 +486,8 @@ def generate_random_points(
         z_points = np.array([distribution.inverse_cdf(u) for u in uniform_samples])
     else:
         batch_size = 1000
-        num_batches = (
-            num_points + batch_size - 1
-        ) // batch_size  # Total number of batches
-        print(
-            f"        Starting computation of {num_points} z-points in {num_batches} batches of {batch_size}..."
-        )
+        num_batches = (num_points + batch_size - 1) // batch_size  # Total number of batches
+        print(f"        Starting computation of {num_points} z-points in {num_batches} batches of {batch_size}...")
 
         for batch_num, i in enumerate(range(0, num_points, batch_size), start=1):
             batch_start_time = time.time()
@@ -464,21 +497,16 @@ def generate_random_points(
             batch_uniform_samples = uniform_samples[i:batch_end]
 
             # Compute z-points for the batch
-            z_points[i:batch_end] = [
-                distribution.inverse_cdf(u) for u in batch_uniform_samples
-            ]
+            z_points[i:batch_end] = [distribution.inverse_cdf(u) for u in batch_uniform_samples]
 
             # Log batch timing
             batch_time = time.time() - batch_start_time
-            print(
-                f"        Processed batch {batch_num}/{num_batches}: {batch_end - i} points in {batch_time:.2f} seconds."
-            )
+            if DEBUG_TIMER:
+                print(f"        Processed batch {batch_num}/{num_batches}: {batch_end - i} points in {batch_time:.6f} seconds.")
 
     if DEBUG_TIMER:
         total_time = time.time() - start_time
-        print(
-            f"    Finished generation of {num_points} points in {total_time:.2f} seconds."
-        )
+        print(f"    Finished generation of {num_points} points in {total_time:.2f} seconds.")
 
     # Combine x, y, and z
     output = np.hstack([xy_points, z_points.reshape(-1, 1)])
@@ -490,13 +518,9 @@ def generate_random_points_old(b_min: np.ndarray, b_max: np.ndarray, num_points:
     return np.random.uniform(b_min, b_max, size=(num_points, 3))
 
 
-def compute_signed_distances(
-    point_list: np.ndarray, mesh_points: np.ndarray, mesh_faces: np.ndarray
-):
+def compute_signed_distances(point_list: np.ndarray, mesh_points: np.ndarray, mesh_faces: np.ndarray):
     """Compute signed distances from points to the triangle mesh."""
-    signed_distances, nearest_face, nearest_points = igl.signed_distance(
-        point_list, mesh_points, mesh_faces
-    )
+    signed_distances, nearest_face, nearest_points = igl.signed_distance(point_list, mesh_points, mesh_faces)
     return signed_distances, nearest_face, nearest_points
 
 
@@ -515,19 +539,11 @@ def filter_function(signed_distance: float, weight_exponent: float) -> bool:
 def filter_points(signed_distances: np.ndarray, weight_exponent: float) -> np.ndarray:
     """Filter points based on their signed distances."""
 
-    filtered_index = np.array(
-        [
-            i
-            for i in range(len(signed_distances))
-            if filter_function(signed_distances[i], weight_exponent)
-        ]
-    )
+    filtered_index = np.array([i for i in range(len(signed_distances)) if filter_function(signed_distances[i], weight_exponent)])
     return filtered_index
 
 
-def generate_sdf_points_from_boundary_points(
-    NUM_POINTS, deformed_boundary_points_t, n, b
-):
+def generate_sdf_points_from_boundary_points(NUM_POINTS, deformed_boundary_points_t, n, b):
     """f = a*z^n + b
     a is calculated so int_min^max f dz = 1"""
 
@@ -763,15 +779,11 @@ def visualize_mesh_with_points(mesh_points, mesh_faces, sdf_points):
     ps_mesh = ps.register_surface_mesh("Mesh", temp_mesh_points, mesh_faces)
 
     # Register the SDF points
-    ps_sdf_points = ps.register_point_cloud(
-        "SDF Points", temp_sdf_points, radius=0.0025
-    )
+    ps_sdf_points = ps.register_point_cloud("SDF Points", temp_sdf_points, radius=0.0025)
     ps_sdf_points.set_color((1.0, 0.0, 0.0))  # Red for SDF points
 
     # Draw bounding boxes
-    draw_bounding_box(
-        b_min, b_max, "Large Bounding Box", color=(0.0, 1.0, 0.0), radius=0.002
-    )
+    draw_bounding_box(b_min, b_max, "Large Bounding Box", color=(0.0, 1.0, 0.0), radius=0.002)
     draw_bounding_box(
         small_b_min,
         small_b_max,
@@ -796,15 +808,11 @@ def main(INDEX, SDF_ONLY, REPLACE, VALIDATE):
         if REPLACE:
             os.remove(OUTPUT_FILE)
         else:
-            print(
-                f"The file {OUTPUT_FILE} already exist. The sdf and points were already calculated"
-            )
+            print(f"The file {OUTPUT_FILE} already exist. The sdf and points were already calculated")
             print(f"So, we won't calculate it. Skipping calculation and exiting (5)")
             return 5
 
-    points, connectivity, time_steps, deformations = load_mesh_and_deformations(
-        xdmf_file=BUNNY_FILE, h5_file=DISPLACEMENT_FILE
-    )
+    points, connectivity, time_steps, deformations = load_mesh_and_deformations(xdmf_file=BUNNY_FILE, h5_file=DISPLACEMENT_FILE)
     print(f"np.shape(points) = {np.shape(points)}")
     print(f"np.shape(connectivity) = {np.shape(connectivity)}")
     print(f"np.shape(time_steps) = {np.shape(time_steps)}")
@@ -828,7 +836,13 @@ def main(INDEX, SDF_ONLY, REPLACE, VALIDATE):
         # animate_deformation(faces, deformed_boundary_points)
         pass
 
-    # Extract bounding box from the undeformed mesh
+    mesh_volume, box_volume = compute_bounding_box_and_volume(points, connectivity)
+
+    ratio = mesh_volume / box_volume
+    inside_points = ratio * NUM_POINTS
+
+    print(f"mesh_volume = {mesh_volume}, box_volume = {box_volume}, ratio = {ratio}, inside_points = {inside_points}")
+    exit(0)
 
     # Prepare to store SDF results
     print("Starting the loop")
@@ -839,48 +853,75 @@ def main(INDEX, SDF_ONLY, REPLACE, VALIDATE):
             # Deform points using displacement
             # Compute signed distances
             # deformed_boundary_points[t_index] is the vertex of the surface mesh (.obj style) of the deformed bunny
-            point_list = generate_sdf_points_from_boundary_points(
-                NUM_POINTS, deformed_boundary_points[t_index], n=Z_EXPONENT, b=Z_OFFSET
-            )
+
+            b_min, b_max = compute_enlarged_bounding_box(deformed_boundary_points[t_index])
+            print(f"    Bounding box:\n    Min: {b_min}\n    Max: {b_max}\n")
+
+            # point_list = generate_sdf_points_from_boundary_points(NUM_POINTS, deformed_boundary_points[t_index], n=Z_EXPONENT, b=Z_OFFSET)
+            point_list = generate_random_points_old(b_min, b_max, NUM_POINTS)
             print(f"\n    type(point_list) = {type(point_list)}")
             print(f"    np.shape(point_list) = {np.shape(point_list)}")
             print(f"    point_list = \n{point_list}\n")
 
-            b_min, b_max = compute_enlarged_bounding_box(
-                deformed_boundary_points[t_index]
-            )
+            b_min, b_max = compute_enlarged_bounding_box(deformed_boundary_points[t_index])
             print(f"    Bounding box:\n    Min: {b_min}\n    Max: {b_max}\n")
 
             if DEBUG_:
-                plot_histograms_with_function(
-                    point_list, b_min, b_max, Z_EXPONENT, Z_OFFSET
-                )
+                plot_histograms_with_function(point_list, b_min, b_max, Z_EXPONENT, Z_OFFSET)
                 visualize_mesh_with_points(
                     deformed_boundary_points[t_index],
                     faces,
                     point_list[0:NUMBER_OF_POINTS_IN_VISUALISATION],
                 )
-                exit(0)
-            signed_distances, _, _ = compute_signed_distances(
-                point_list, deformed_boundary_points[t_index], faces
-            )
+            signed_distances, _, _ = compute_signed_distances(point_list, deformed_boundary_points[t_index], faces)
             print(f"obtained signed distances")
+            if t_index == 0:
+                print("")
+                print(f"Shape of signed_distances: {np.shape(signed_distances)}")
+                print(f"Minimum SDF value: {min(signed_distances):.6f}")
+                print(f"Filtered SDF values: {signed_distances}")
+
+                sdf_negative = signed_distances[signed_distances < 0]
+                sdf_positive = signed_distances[signed_distances >= 0]
+
+                print("")
+                print(f"SDF < 0: \n{sdf_negative}")
+                print(f"SDF > 0: \n{sdf_positive}")
+                print("")
+
+                print(f"Number SDF < 0: {len(sdf_negative)}, Number SDF > 0: {len(sdf_positive)}")
+
+                plt.hist(signed_distances)
+                plt.show()
 
             # Filter points based on signed distances
             filtered_index = filter_points(signed_distances, weight_exponent=20)
             filtered_points = point_list[filtered_index]
 
             filtered_signed_distances = signed_distances[filtered_index]
+
+            if t_index == 0:
+                print(f"Shape of filtered signed_distances: {np.shape(filtered_signed_distances)}")
+                print(f"Minimum SDF value: {min(filtered_signed_distances):.6f}")
+                print(f"Filtered SDF values: {filtered_signed_distances}")
+
+                sdf_negative = filtered_signed_distances[filtered_signed_distances < 0]
+                sdf_positive = filtered_signed_distances[filtered_signed_distances >= 0]
+
+                print(f"SDF < 0 count: {sdf_negative}")
+                print(f"SDF > 0 count: {sdf_positive}")
+
+                print(f"Lengths -> SDF < 0: {len(sdf_negative)}, SDF > 0: {len(sdf_positive)}")
+
+                plt.hist(filtered_signed_distances)
+                plt.show()
+
             print(f"np.shape(filtered_points) = {np.shape(filtered_points)}")
             print(f"np.shape(signed_distances) = {np.shape(signed_distances)}")
-            print(
-                f"np.shape(filtered_signed_distances) = {np.shape(filtered_signed_distances)}"
-            )
+            print(f"np.shape(filtered_signed_distances) = {np.shape(filtered_signed_distances)}")
 
             # Combine points and signed distances
-            sdf_with_points = np.hstack(
-                (filtered_points, filtered_signed_distances[:, None])
-            )
+            sdf_with_points = np.hstack((filtered_points, filtered_signed_distances[:, None]))
             f.create_dataset(f"time_{t_index}", data=sdf_with_points)
 
             print(f"Processed time step {t_index}/{len(time_steps) -1}")
@@ -895,20 +936,14 @@ def main(INDEX, SDF_ONLY, REPLACE, VALIDATE):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Calculate SDF for deformed meshes.")
-    parser.add_argument(
-        "--index", type=int, required=True, help="Index of the deformation file."
-    )
-    parser.add_argument(
-        "--sdf_only", action="store_true", help="Only save the SDF values."
-    )
+    parser.add_argument("--index", type=int, required=True, help="Index of the deformation file.")
+    parser.add_argument("--sdf_only", action="store_true", help="Only save the SDF values.")
     parser.add_argument(
         "--replace",
         action="store_true",
         help="Recalculate the sdf if it already is calculated, and replace the output file",
     )
-    parser.add_argument(
-        "--validate", action="store_true", help="Generate points for validation"
-    )
+    parser.add_argument("--validate", action="store_true", help="Generate points for validation")
     args = parser.parse_args()
 
     INDEX = args.index
