@@ -15,7 +15,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from mpl_toolkits.mplot3d import Axes3D
 
 
-from __TRAINING_FILE import MeshEncoder, SDFCalculator, LATENT_DIM
+from __TRAINING_FILE import MeshEncoder, SDFCalculator, TrainingContext, LATENT_DIM, DEFAULT_FINGER_INDEX
 
 GRID_DIM = 30
 
@@ -25,10 +25,12 @@ LOAD_DIR = "./training_data"
 
 # Directory where we save and load the neural weights
 NEURAL_WEIGHTS_DIR = "./neural_weights"
+FINGER_INDEX = 730
 
 
-def read_pickle(directory, filename):
-    long_file_name = f"{directory}/{filename}.pkl"
+def read_pickle(directory, filename, finger_index, validate=False):
+    long_file_name = f"{directory}/{filename}_{finger_index}{'_validate' if validate else ''}.pkl"
+    print(long_file_name, "\n")
 
     with open(long_file_name, "rb") as file:
         output = pickle.load(file)
@@ -110,11 +112,6 @@ def recreate_shape(mesh_encoder, sdf_calculator, time_index_visualise, vertices_
     print("\nPredicted SDF values:")
     print(f"Shape: {predicted_sdf_np.shape}")
     print(f"Values:\n{predicted_sdf_np}")
-
-    import torch
-
-
-import numpy as np
 
 
 def calculate_sdf_at_points(mesh_encoder, sdf_calculator, vertices_tensor, time_index, query_points_np) -> np.ndarray:
@@ -265,11 +262,11 @@ def visualize_sdf_points(query_points, sdf_values, threshold=0):
     plt.show()
 
 
-def main(epoch_index=100, time_index=0):
-    vertices_tensor_np = read_pickle(LOAD_DIR, "vertices_tensor")
-    faces = read_pickle(LOAD_DIR, "vertices_tensor")
-    sdf_points = read_pickle(LOAD_DIR, "sdf_points")
-    sdf_values = read_pickle(LOAD_DIR, "sdf_values")
+def main(epoch_index=100, time_index=0, finger_index=DEFAULT_FINGER_INDEX):
+    vertices_tensor_np = read_pickle(LOAD_DIR, "vertices_tensor", finger_index)
+    faces = read_pickle(LOAD_DIR, "vertices_tensor", finger_index)
+    sdf_points = read_pickle(LOAD_DIR, "sdf_points", finger_index)
+    sdf_values = read_pickle(LOAD_DIR, "sdf_values", finger_index)
 
     # Convert inputs to PyTorch tensors
     vertices_tensor = torch.tensor(vertices_tensor_np, dtype=torch.float32)  # (time_steps, num_vertices, 3)
@@ -277,9 +274,14 @@ def main(epoch_index=100, time_index=0):
     sdf_values = torch.tensor(sdf_values, dtype=torch.float32).unsqueeze(-1)  # (time_steps, num_points, 1)
     input_dim = vertices_tensor.shape[1] * vertices_tensor.shape[2]  # num_vertices * 3
 
+    number_of_shape_per_familly = sdf_points.shape[0]
     mesh_encoder = MeshEncoder(input_dim=input_dim, latent_dim=LATENT_DIM)
     sdf_calculator = SDFCalculator(latent_dim=LATENT_DIM)
-    load_model_weights(mesh_encoder, sdf_calculator, epoch_index, time_index)
+    training_context = TrainingContext(mesh_encoder, sdf_calculator, finger_index, number_of_shape_per_familly, 0.1)
+    training_context.load_model_weights(epoch_index, time_index)
+
+    mesh_encoder = training_context.mesh_encoder
+    sdf_calculator = training_context.sdf_calculator
 
     time_index_visualise = 0
     # recreate_shape(mesh_encoder, sdf_calculator, time_index_visualise, vertices_tensor, sdf_points)
@@ -306,14 +308,20 @@ def main(epoch_index=100, time_index=0):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="use a trained model to recreate shapes")
     # Arguments for epoch and time indices
-    parser.add_argument("--epoch_index", type=int, help="Specify the epoch index to continue processing from.")
-    parser.add_argument("--time_index", type=int, help="Specify the time index to continue processing from.")
+    parser.add_argument("--epoch_index", type=int, help="Specify the epoch index to recreate the shape from")
+    parser.add_argument("--time_index", type=int, help="Specify the time index of processing to recreate the shape from")
+    parser.add_argument("--finger_index", type=int, help="Specify the finger index where the force was applied")
     args = parser.parse_args()
 
     if args.epoch_index is None and args.time_index is None:
-        epoch_index, time_index = 100, 0
+        epoch_index, time_index = 80, 0
     else:
         epoch_index, time_index = args.epoch_index, args.time_index
 
-    ret = main(epoch_index, time_index)
+    if args.finger_index is None:
+        finger_index = DEFAULT_FINGER_INDEX
+    else:
+        finger_index = args.finger_index
+
+    ret = main(epoch_index, time_index, finger_index)
     exit(ret)

@@ -16,8 +16,6 @@ import pickle
 
 
 BUNNY_FILE = "bunny.xdmf"
-DISPLACEMENT_FILE = f"./deformed_bunny_files_tunned/displacement_1.h5"
-SDF_FILE = "./calculated_sdf_tunned/sdf_points_1.h5"  # Replace with the path to your HDF5 file
 NUMBER_OF_POINTS_IN_VISUALISATION = 10_000
 
 
@@ -224,6 +222,33 @@ def process_sdf_data(input_file):
             sdf_values[t_index] = data[:min_points, 3]  # Extract sdf
 
         return sdf_points, sdf_values
+
+
+def resize_to_minimum(sdf_points, sdf_values, sdf_points_validate, sdf_values_validate):
+    """
+    Resize the training and validation SDF datasets to the minimum number of points across all datasets.
+
+    Args:
+        sdf_points (np.ndarray): Training SDF points of shape (time_steps, num_points, 3).
+        sdf_values (np.ndarray): Training SDF values of shape (time_steps, num_points).
+        sdf_points_validate (np.ndarray): Validation SDF points of shape (time_steps, num_points, 3).
+        sdf_values_validate (np.ndarray): Validation SDF values of shape (time_steps, num_points).
+
+    Returns:
+        Tuple: Resized (sdf_points, sdf_values, sdf_points_validate, sdf_values_validate).
+    """
+    # Determine the minimum number of points across all datasets
+    min_points = min(sdf_points.shape[1], sdf_points_validate.shape[1], sdf_values.shape[1], sdf_values_validate.shape[1])
+
+    print(f"Resizing datasets to minimum number of points: {min_points}")
+
+    # Resize datasets to the minimum number of points
+    sdf_points = sdf_points[:, :min_points, :]
+    sdf_values = sdf_values[:, :min_points]
+    sdf_points_validate = sdf_points_validate[:, :min_points, :]
+    sdf_values_validate = sdf_values_validate[:, :min_points]
+
+    return sdf_points, sdf_values, sdf_points_validate, sdf_values_validate
 
 
 def show_mesh(faces: np.ndarray, vertices: np.ndarray):
@@ -437,7 +462,7 @@ def visualize_mesh_with_points(mesh_vertices, mesh_faces, sdf_points, sdf_values
     ps.show()
 
 
-def main():
+def main(DISPLACEMENT_FILE, SDF_FILE, SDF_FILE_VALIDATE, index):
     mesh_points, mesh_connectivity, time_steps, deformations, faces, boundary_vertices_index = load_mesh_and_deformations(
         xdmf_file=BUNNY_FILE, h5_file=DISPLACEMENT_FILE
     )
@@ -451,10 +476,17 @@ def main():
         return faces, vertices_tensor[t_index]
 
     sdf_points, sdf_values = process_sdf_data(SDF_FILE)
+    sdf_points_validate, sdf_values_validate = process_sdf_data(SDF_FILE_VALIDATE)
+
+    sdf_points, sdf_values, sdf_points_validate, sdf_values_validate = resize_to_minimum(
+        sdf_points, sdf_values, sdf_points_validate, sdf_values_validate
+    )
 
     print(f"\n")
     print("shape(sdf_points) =", np.shape(sdf_points))
     print("shape(sdf_values) =", np.shape(sdf_values))
+    print("shape(sdf_points_validate) =", np.shape(sdf_points_validate))
+    print("shape(sdf_values_validate) =", np.shape(sdf_values_validate))
 
     print("shape(vertices_tensor) =", np.shape(vertices_tensor))
     print("shape(faces) =", np.shape(faces))
@@ -472,10 +504,12 @@ def main():
     os.makedirs(TRAINING_DIR, exist_ok=True)
     # File paths
     files = {
-        "sdf_points": os.path.join(TRAINING_DIR, "sdf_points.pkl"),
-        "sdf_values": os.path.join(TRAINING_DIR, "sdf_values.pkl"),
-        "vertices_tensor": os.path.join(TRAINING_DIR, "vertices_tensor.pkl"),
-        "faces": os.path.join(TRAINING_DIR, "faces.pkl"),
+        "sdf_values": os.path.join(TRAINING_DIR, f"sdf_values_{index}.pkl"),
+        "sdf_points": os.path.join(TRAINING_DIR, f"sdf_points_{index}.pkl"),
+        "sdf_points_validate": os.path.join(TRAINING_DIR, f"sdf_points_{index}_validate.pkl"),
+        "sdf_values_validate": os.path.join(TRAINING_DIR, f"sdf_values_{index}_validate.pkl"),
+        "vertices_tensor": os.path.join(TRAINING_DIR, f"vertices_tensor_{index}.pkl"),
+        "faces": os.path.join(TRAINING_DIR, f"faces_{index}.pkl"),
     }
 
     # Save each object
@@ -488,5 +522,16 @@ def main():
 
 
 if __name__ == "__main__":
-    ret = main()
+    parser = argparse.ArgumentParser(description="Create animation from deformation data.")
+    parser.add_argument("--index", type=int, help="Index of the deformation scenario.")
+    # Set up argument parsing
+
+    args = parser.parse_args()
+    index = args.index
+
+    DISPLACEMENT_FILE = f"./deformed_bunny_files_tunned/displacement_{index}.h5"
+    SDF_FILE = f"./calculated_sdf_tunned/sdf_points_{index}.h5"  # Replace with the path to your HDF5 file
+    SDF_FILE_VALIDATE = f"./calculated_sdf_tunned/sdf_points_{index}_validate.h5"  # Replace with the path to your HDF5 file
+
+    ret = main(DISPLACEMENT_FILE, SDF_FILE, SDF_FILE_VALIDATE, index)
     exit(ret)
