@@ -190,8 +190,11 @@ def extract_boundary_info(domain) -> Tuple[np.ndarray, np.ndarray]:
     return faces, boundary_vertices_index
 
 
-def get_surface_mesh(points: np.ndarray, connectivity: np.ndarray):
-    """Extract the surface mesh from the tetrahedral mesh."""
+def get_surface_mesh(points: np.ndarray, connectivity: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Extract the surface mesh from the tetrahedral mesh.
+
+    return vertices, faces
+    """
     cells = np.hstack([np.full((connectivity.shape[0], 1), 4), connectivity]).flatten()
     cell_types = np.full(connectivity.shape[0], 10, dtype=np.uint8)  # Tetrahedron type
     tetra_mesh = pv.UnstructuredGrid(cells, cell_types, points)
@@ -203,7 +206,9 @@ def get_surface_mesh(points: np.ndarray, connectivity: np.ndarray):
     vertices = surface_mesh.points
     faces = surface_mesh.faces.reshape(-1, 4)[:, 1:]  # Remove face size prefix
 
-    return vertices, faces
+    np_vertices = vertices.view(np.ndarray)
+
+    return np_vertices, faces
 
 
 def compute_small_bounding_box(mesh_points: np.ndarray) -> (np.ndarray, np.ndarray):
@@ -526,7 +531,8 @@ def compute_signed_distances(point_list: np.ndarray, mesh_points: np.ndarray, me
 
 def weight_function(signed_distance: float, weight_exponent: float = 10) -> float:
     """Takes a signed_distances and return a probability of taking said points"""
-    return (1 + abs(signed_distance)) ** (-weight_exponent)
+    multiplier = 3 if signed_distance < 0 else 0.8
+    return multiplier * (1 + abs(signed_distance)) ** (-weight_exponent)
 
 
 def filter_function(signed_distance: float, weight_exponent: float) -> bool:
@@ -818,31 +824,69 @@ def main(INDEX, SDF_ONLY, REPLACE, VALIDATE):
     print(f"np.shape(time_steps) = {np.shape(time_steps)}")
     print(f"np.shape(deformations) = {np.shape(deformations)}")
 
-    domain = load_file(BUNNY_FILE)
-    faces, vertex_index = extract_boundary_info(domain)
-    print(f"np.shape(faces) = {np.shape(faces)}")
-    print(f"np.shape(vertex_index) = {np.shape(vertex_index)}")
-    print("\n\n\n")
-    boundary_points = points[vertex_index]
-    boundary_deformations = deformations[:, vertex_index]
+    deformed_vertices_list, deformed_faces_list = [], []
+    for deformation in deformations:
+        deformed_surface_vertices, deformed_surfaces_faces = get_surface_mesh(points + deformation, connectivity)
+        deformed_vertices_list.append(deformed_surface_vertices)
+        deformed_faces_list.append(deformed_surfaces_faces)
+        print(np.shape(deformed_surface_vertices), np.shape(deformed_surfaces_faces))
 
-    deformed_boundary_points = boundary_points + boundary_deformations
+    deformed_vertices_array = np.array(deformed_vertices_list)
+    deformed_faces_array = np.array(deformed_faces_list)
+
+    print(f"type(deformed_vertices_array) = {type(deformed_vertices_array)}")
+    print(f"np.shape(deformed_vertices_array) = {np.shape(deformed_vertices_array)}")
+
+    print(f"type(deformed_faces_array) = {type(deformed_faces_array)}")
+    print(f"np.shape(deformed_vertices_list) = {np.shape(deformed_faces_array)}")
+
+    init_vertex = deformed_vertices_array[0, :, :]
+    init_face = deformed_faces_array[0, :, :]
+    max_fl, max_vl = [], []
+    min_fl, min_vl = [], []
+    for i in range(len(deformed_faces_array)):
+        comp_vertex = deformed_vertices_array[i, :, :]
+        comp_face = deformed_faces_array[i, :, :]
+
+        diff_vertex = comp_vertex - init_vertex
+        diff_face = comp_face - init_face
+        max_fl.append(np.max(diff_face))
+        max_vl.append(np.max(diff_vertex))
+
+        min_fl.append(np.min(diff_face))
+        min_vl.append(np.min(diff_vertex))
+
+    print("\n\n")
+    print(f"min_fl = {min_fl}\n")
+    print(f"max_fl = {max_fl}\n")
+
+    print("\n")
+    print(f"min_vl = {min_vl}\n")
+    print(f"max_vl = {max_vl}\n")
+
+    faces = deformed_faces_array = deformed_faces_list[0]
+    deformed_boundary_points = deformed_vertices_array
+    # deformed_boundary_points = boundary_points + boundary_deformations
 
     def shape(t_index):
         return faces, deformed_boundary_points[t_index]
 
     if DEBUG_:
-        # show_mesh(*shape(0))
-        # animate_deformation(faces, deformed_boundary_points)
+        show_mesh(*shape(0))
+        animate_deformation(faces, deformed_boundary_points)
         pass
 
     mesh_volume, box_volume = compute_bounding_box_and_volume(points, connectivity)
+    mesh_volume1, box_volume1 = compute_bounding_box_and_volume(deformed_boundary_points[0], faces)
 
     ratio = mesh_volume / box_volume
     inside_points = ratio * NUM_POINTS
 
+    ratio1 = mesh_volume1 / box_volume1
+    inside_points1 = ratio1 * NUM_POINTS
+
     print(f"mesh_volume = {mesh_volume}, box_volume = {box_volume}, ratio = {ratio}, inside_points = {inside_points}")
-    exit(0)
+    print(f"mesh_volume1 = {mesh_volume1}, box_volume1 = {box_volume1}, ratio = {ratio1}, inside_points = {inside_points1}")
 
     # Prepare to store SDF results
     print("Starting the loop")
@@ -857,8 +901,8 @@ def main(INDEX, SDF_ONLY, REPLACE, VALIDATE):
             b_min, b_max = compute_enlarged_bounding_box(deformed_boundary_points[t_index])
             print(f"    Bounding box:\n    Min: {b_min}\n    Max: {b_max}\n")
 
-            # point_list = generate_sdf_points_from_boundary_points(NUM_POINTS, deformed_boundary_points[t_index], n=Z_EXPONENT, b=Z_OFFSET)
-            point_list = generate_random_points_old(b_min, b_max, NUM_POINTS)
+            point_list = generate_sdf_points_from_boundary_points(NUM_POINTS, deformed_boundary_points[t_index], n=Z_EXPONENT, b=Z_OFFSET)
+            # point_list = generate_random_points_old(b_min, b_max, NUM_POINTS)
             print(f"\n    type(point_list) = {type(point_list)}")
             print(f"    np.shape(point_list) = {np.shape(point_list)}")
             print(f"    point_list = \n{point_list}\n")
@@ -866,7 +910,7 @@ def main(INDEX, SDF_ONLY, REPLACE, VALIDATE):
             b_min, b_max = compute_enlarged_bounding_box(deformed_boundary_points[t_index])
             print(f"    Bounding box:\n    Min: {b_min}\n    Max: {b_max}\n")
 
-            if DEBUG_:
+            if DEBUG_ and t_index == 0:
                 plot_histograms_with_function(point_list, b_min, b_max, Z_EXPONENT, Z_OFFSET)
                 visualize_mesh_with_points(
                     deformed_boundary_points[t_index],
@@ -875,8 +919,8 @@ def main(INDEX, SDF_ONLY, REPLACE, VALIDATE):
                 )
             signed_distances, _, _ = compute_signed_distances(point_list, deformed_boundary_points[t_index], faces)
             print(f"obtained signed distances")
-            if t_index == 0:
-                print("")
+            if t_index == 0 and DEBUG_:
+                print("\n\n-----------------------ORIGINAL SIGNED DISTANCES----------------------------\n\n")
                 print(f"Shape of signed_distances: {np.shape(signed_distances)}")
                 print(f"Minimum SDF value: {min(signed_distances):.6f}")
                 print(f"Filtered SDF values: {signed_distances}")
@@ -891,6 +935,11 @@ def main(INDEX, SDF_ONLY, REPLACE, VALIDATE):
 
                 print(f"Number SDF < 0: {len(sdf_negative)}, Number SDF > 0: {len(sdf_positive)}")
 
+                plt.figure()
+                plt.grid()
+                plt.title("Signed distance occurance before filtering")
+                plt.xlabel("signed distance value")
+                plt.ylabel("frequencies")
                 plt.hist(signed_distances)
                 plt.show()
 
@@ -900,7 +949,8 @@ def main(INDEX, SDF_ONLY, REPLACE, VALIDATE):
 
             filtered_signed_distances = signed_distances[filtered_index]
 
-            if t_index == 0:
+            if t_index == 0 and DEBUG_:
+                print("\n\n-----------------------FILTERED SIGNED DISTANCES----------------------------\n\n")
                 print(f"Shape of filtered signed_distances: {np.shape(filtered_signed_distances)}")
                 print(f"Minimum SDF value: {min(filtered_signed_distances):.6f}")
                 print(f"Filtered SDF values: {filtered_signed_distances}")
@@ -911,8 +961,13 @@ def main(INDEX, SDF_ONLY, REPLACE, VALIDATE):
                 print(f"SDF < 0 count: {sdf_negative}")
                 print(f"SDF > 0 count: {sdf_positive}")
 
-                print(f"Lengths -> SDF < 0: {len(sdf_negative)}, SDF > 0: {len(sdf_positive)}")
+                print(f"Number SDF < 0: {len(sdf_negative)}, Number SDF > 0: {len(sdf_positive)}")
 
+                plt.figure()
+                plt.grid()
+                plt.title("Signed distance occurance after filtering")
+                plt.xlabel("signed distance value")
+                plt.ylabel("frequencies")
                 plt.hist(filtered_signed_distances)
                 plt.show()
 

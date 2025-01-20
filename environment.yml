@@ -1,12 +1,13 @@
 name: master_venv
 channels:
+  - anaconda
   - defaults
   - conda-forge
   - https://repo.anaconda.com/pkgs/main
   - https://repo.anaconda.com/pkgs/r
 dependencies:
   - _libgcc_mutex=0.1=conda_forge
-  - _openmp_mutex=4.5=2_gnu
+  - _openmp_mutex=4.5=2_kmp_llvm
   - aiohappyeyeballs=2.4.4=pyhd8ed1ab_1
   - aiohttp=3.11.9=py310h89163eb_0
   - aiosignal=1.3.1=pyhd8ed1ab_1
@@ -17,6 +18,7 @@ dependencies:
   - attrs=24.2.0=pyh71513ae_1
   - binutils_impl_linux-64=2.40=h5293946_0
   - binutils_linux-64=2.40=hb3c18ed_9
+  - blas=1.0=openblas
   - blis=0.9.0=h4ab18f5_2
   - blosc=1.21.6=hef167b5_0
   - brotli=1.1.0=hb9d3cd8_2
@@ -25,11 +27,11 @@ dependencies:
   - bzip2=1.0.8=h5eee18b_6
   - c-ares=1.34.3=hb9d3cd8_1
   - c-blosc2=2.15.2=h68e2383_0
-  - ca-certificates=2024.12.14=hbcca054_0
+  - ca-certificates=2024.12.31=h06a4308_0
   - cached-property=1.5.2=hd8ed1ab_1
   - cached_property=1.5.2=pyha770c72_1
   - cairo=1.18.2=h3394656_1
-  - certifi=2024.12.14=pyhd8ed1ab_0
+  - certifi=2024.12.14=py310h06a4308_0
   - cffi=1.16.0=py310h2fee648_0
   - cftime=1.6.4=py310hf462985_1
   - charset-normalizer=3.4.0=pyhd8ed1ab_1
@@ -49,8 +51,9 @@ dependencies:
   - fenics-libdolfinx=0.9.0=h4477135_104
   - fenics-ufcx=0.9.0=hb7f7608_0
   - fenics-ufl=2024.2.0=pyhd8ed1ab_1
-  - ffmpeg=7.1.0=gpl_h4c12d27_707
+  - ffmpeg=7.1.0=gpl_heed6883_705
   - fftw=3.3.10=mpi_mpich_hbcf76dd_10
+  - filelock=3.13.1=py310h06a4308_0
   - fmt=11.0.2=h434a139_0
   - font-ttf-dejavu-sans-mono=2.37=hab24e00_0
   - font-ttf-inconsolata=3.000=h77eed37_0
@@ -63,6 +66,7 @@ dependencies:
   - freetype=2.12.1=h267a509_2
   - fribidi=1.0.10=h36c2ea0_0
   - frozenlist=1.5.0=py310ha75aee5_0
+  - fsspec=2024.12.0=py310h06a4308_0
   - gcc_impl_linux-64=13.3.0=hfea6d02_1
   - gcc_linux-64=13.3.0=hc28eda2_7
   - gdk-pixbuf=2.42.12=hb9ae30d_0
@@ -73,6 +77,7 @@ dependencies:
   - glib=2.82.2=h44428e9_0
   - glib-tools=2.82.2=h4833e2c_0
   - gmp=6.3.0=hac33072_2
+  - gmpy2=2.1.2=py310heeb90bb_0
   - gnutls=3.7.9=hb077bed_0
   - graphite2=1.3.13=h59595ed_1003
   - gst-plugins-base=1.24.7=h0a52356_0
@@ -91,6 +96,8 @@ dependencies:
   - imageio=2.33.1=py310h06a4308_0
   - importlib-metadata=8.5.0=pyha770c72_1
   - importlib_metadata=8.5.0=hd8ed1ab_1
+  - jinja2=3.1.4=py310h06a4308_1
+  - joblib=1.4.2=py310h06a4308_0
   - jsoncpp=1.9.6=hf42df4d_1
   - kahip=3.16=h2fbc463_4
   - kernel-headers_linux-64=3.10.0=he073ed8_18
@@ -98,17 +105,18 @@ dependencies:
   - kiwisolver=1.4.7=py310h3788b33_0
   - krb5=1.21.3=h659f571_0
   - lame=3.100=h166bdaf_1003
+  - lazy_loader=0.4=py310h06a4308_0
   - lcms2=2.16=hb7c19ff_0
   - ld_impl_linux-64=2.40=h12ee557_0
   - lerc=4.0.0=h27087fc_0
-  - libabseil=20240722.0=cxx17_h5888daf_1
+  - libabseil=20240116.2=cxx17_h6a678d5_0
   - libadios2=2.10.1=mpi_mpich_h1ff26fa_4
   - libaec=1.1.3=h59595ed_0
   - libarchive=3.7.4=hfca40fe_0
   - libasprintf=0.22.5=he8f35ee_3
   - libasprintf-devel=0.22.5=he8f35ee_3
   - libass=0.17.3=h1dc1e6a_0
-  - libblas=3.9.0=25_linux64_blis
+  - libblas=3.9.0=26_linux64_openblas
   - libboost=1.86.0=h6c02f8c_3
   - libboost-devel=1.86.0=h1a2810e_3
   - libboost-headers=1.86.0=ha770c72_3
@@ -116,7 +124,7 @@ dependencies:
   - libbrotlidec=1.1.0=hb9d3cd8_2
   - libbrotlienc=1.1.0=hb9d3cd8_2
   - libcap=2.71=h39aace5_0
-  - libcblas=3.9.0=25_linux64_blis
+  - libcblas=3.9.0=26_linux64_openblas
   - libclang=19.1.2=default_hb5137d0_1
   - libclang-cpp15=15.0.7=default_h127d8a8_5
   - libclang-cpp18.1=18.1.8=default_hf981a13_5
@@ -154,7 +162,7 @@ dependencies:
   - libiconv=1.17=hd590300_2
   - libidn2=2.3.7=hd590300_0
   - libjpeg-turbo=3.0.0=hd590300_1
-  - liblapack=3.9.0=8_h3b12eaf_netlib
+  - liblapack=3.9.0=26_linux64_openblas
   - libllvm15=15.0.7=hb3ce162_4
   - libllvm17=17.0.6=hc9dba70_2
   - libllvm18=18.1.8=h8b73ec9_2
@@ -166,25 +174,26 @@ dependencies:
   - libnl=3.11.0=hb9d3cd8_0
   - libnsl=2.0.1=hd590300_0
   - libogg=1.3.5=h4ab18f5_0
+  - libopenblas=0.3.28=openmp_hd680484_1
   - libopengl=1.7.0=ha4b6fd6_0
-  - libopenvino=2024.5.0=hac27bb2_0
-  - libopenvino-auto-batch-plugin=2024.5.0=h4d9b6c2_0
-  - libopenvino-auto-plugin=2024.5.0=h4d9b6c2_0
-  - libopenvino-hetero-plugin=2024.5.0=h3f63f65_0
-  - libopenvino-intel-cpu-plugin=2024.5.0=hac27bb2_0
-  - libopenvino-intel-gpu-plugin=2024.5.0=hac27bb2_0
-  - libopenvino-intel-npu-plugin=2024.5.0=hac27bb2_0
-  - libopenvino-ir-frontend=2024.5.0=h3f63f65_0
-  - libopenvino-onnx-frontend=2024.5.0=h5c8f2c3_0
-  - libopenvino-paddle-frontend=2024.5.0=h5c8f2c3_0
-  - libopenvino-pytorch-frontend=2024.5.0=h5888daf_0
-  - libopenvino-tensorflow-frontend=2024.5.0=h6481b9d_0
-  - libopenvino-tensorflow-lite-frontend=2024.5.0=h5888daf_0
+  - libopenvino=2024.4.0=hac27bb2_0
+  - libopenvino-auto-batch-plugin=2024.4.0=h4d9b6c2_0
+  - libopenvino-auto-plugin=2024.4.0=h4d9b6c2_0
+  - libopenvino-hetero-plugin=2024.4.0=h3f63f65_0
+  - libopenvino-intel-cpu-plugin=2024.4.0=hac27bb2_0
+  - libopenvino-intel-gpu-plugin=2024.4.0=hac27bb2_0
+  - libopenvino-intel-npu-plugin=2024.4.0=hac27bb2_0
+  - libopenvino-ir-frontend=2024.4.0=h3f63f65_0
+  - libopenvino-onnx-frontend=2024.4.0=h56242b0_0
+  - libopenvino-paddle-frontend=2024.4.0=h56242b0_0
+  - libopenvino-pytorch-frontend=2024.4.0=h5888daf_0
+  - libopenvino-tensorflow-frontend=2024.4.0=h358ae18_0
+  - libopenvino-tensorflow-lite-frontend=2024.4.0=h5888daf_0
   - libopus=1.3.1=h7f98852_1
   - libpciaccess=0.18=hd590300_0
   - libpng=1.6.44=hadc24fc_0
   - libpq=16.6=h035377e_1
-  - libprotobuf=5.28.2=h5b01275_0
+  - libprotobuf=4.25.3=hd5b35b9_1
   - libptscotch=7.0.5=h7ea1560_4
   - librsvg=2.58.4=hc0ffecb_0
   - libsanitizer=13.3.0=heb74ff8_1
@@ -213,21 +222,25 @@ dependencies:
   - libxslt=1.1.39=h76b75d6_0
   - libzip=1.11.2=h6991a6a_0
   - libzlib=1.3.1=hb9d3cd8_2
+  - llvm-openmp=19.1.6=h024ca30_0
   - loguru=0.7.2=py310hff52083_2
   - lz4-c=1.9.4=hcb278e6_0
   - lzo=2.10=hd590300_1001
   - markdown-it-py=3.0.0=pyhd8ed1ab_1
+  - markupsafe=2.1.3=py310h5eee18b_1
   - matplotlib=3.9.3=py310hff52083_0
   - matplotlib-base=3.9.3=py310h68603db_0
   - mdurl=0.1.2=pyhd8ed1ab_1
   - mesalib=24.2.3=h4e3793c_0
   - meshio=5.3.5=pyhd8ed1ab_0
   - metis=5.1.0=hd0bcaf9_1007
+  - mpc=1.1.0=h10f8cd9_1
   - mpfr=4.2.1=h90cbb55_3
   - mpg123=1.32.9=hc50e24c_0
   - mpi=1.0.1=mpich
   - mpi4py=4.0.1=py310hc9139ab_0
   - mpich=4.2.3=h239ebd3_102
+  - mpmath=1.3.0=py310h06a4308_0
   - msgpack-python=1.1.0=py310h3788b33_0
   - multidict=6.1.0=py310h89163eb_1
   - mumps-include=5.7.3=ha770c72_5
@@ -238,6 +251,7 @@ dependencies:
   - ncurses=6.5=he02047a_1
   - netcdf4=1.7.2=nompi_py310h9f0ad05_101
   - nettle=3.9.1=h7ab15ed_0
+  - networkx=3.3=py310h06a4308_0
   - nlohmann_json=3.11.3=he02047a_1
   - nspr=4.36=h5888daf_0
   - nss=3.107=hdf54f9c_0
@@ -274,6 +288,7 @@ dependencies:
   - python=3.10.13=hd12c33a_1_cpython
   - python-dateutil=2.9.0.post0=pyhff2d567_1
   - python_abi=3.10=5_cp310
+  - pytorch=2.3.1=cpu_py310h4f03144_0
   - pyvista=0.44.2=pyhd8ed1ab_1
   - qhull=2020.2=h434a139_5
   - qt-main=5.15.15=h374914d_0
@@ -283,6 +298,8 @@ dependencies:
   - requests=2.32.3=pyhd8ed1ab_1
   - rich=13.9.4=pyhd8ed1ab_1
   - scalapack=2.2.0=h7e29ba8_4
+  - scikit-image=0.24.0=py310h1128e8f_0
+  - scikit-learn=1.5.2=py310h6a678d5_0
   - scipy=1.14.1=py310hfcf56fc_2
   - scooby=0.10.0=pyhd8ed1ab_0
   - setuptools=75.1.0=py310h06a4308_0
@@ -296,9 +313,12 @@ dependencies:
   - superlu=5.2.2=h00795ac_0
   - superlu_dist=9.1.0=h0804ebd_0
   - svt-av1=2.3.0=h5888daf_0
+  - sympy=1.13.3=py310h06a4308_0
   - sysroot_linux-64=2.17=h4a8ded7_18
   - tbb=2022.0.0=hceb3a55_0
   - tbb-devel=2022.0.0=h1f99690_0
+  - threadpoolctl=3.5.0=py310h2f386ee_0
+  - tifffile=2024.12.12=py310h06a4308_0
   - tk=8.6.13=noxft_h4845f30_101
   - tornado=6.4.2=py310ha75aee5_0
   - typing-extensions=4.12.2=hd8ed1ab_1

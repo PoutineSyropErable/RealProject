@@ -17,8 +17,44 @@ os.chdir(sys.path[0])
 # Hardcoded paths
 DISPLACEMENT_DIRECTORY = "./deformed_bunny_files_tunned"
 BUNNY_FILE = "bunny.xdmf"
-SDF_DIRECTORY = "./calculated_sdf"
+SDF_DIRECTORY = "./calculated_sdf_tunned"
 POINTS_TO_TAKE_SDF_FILE = "points_to_take_sdf.npy"
+
+
+def load_sdf_data(displacement_index, time_index, sdf_only):
+    """
+    Load SDF data for a specific displacement index and time index.
+
+    Args:
+        displacement_index (int): Index of the displacement file.
+        time_index (int): Time index for SDF data.
+        sdf_only (bool): Whether to load only the SDF values.
+
+    Returns:
+        tuple: (points, sdf) if not sdf_only, otherwise just sdf.
+    """
+    file_suffix = "_sdf_only" if sdf_only else ""
+    input_file = f"{SDF_DIRECTORY}/sdf_points_{displacement_index}{file_suffix}.h5"
+
+    print(f"Loading SDF data from: {input_file}")
+
+    with h5py.File(input_file, "r") as f:
+        dataset_name = f"time_{time_index}"
+        if dataset_name not in f:
+            raise KeyError(f"Dataset '{dataset_name}' not found in file {input_file}.")
+
+        data = f[dataset_name][:]
+
+        if sdf_only:
+            # Return only the SDF values
+            sdf = data
+            points = np.load(POINTS_TO_TAKE_SDF_FILE)
+        else:
+            # Return points and SDF values
+            points = data[:, :3]
+            sdf = data[:, 3]
+
+        return points, sdf
 
 
 def load_file(filename: str) -> mesh.Mesh:
@@ -327,7 +363,7 @@ def main():
 
     # Construct file paths
     displacement_file = f"{DISPLACEMENT_DIRECTORY}/displacement_{finger_index}.h5"
-    mesh_points, mesh_connectivity, time_steps, deformations = load_mesh_and_deformations(xdmf_file=BUNNY_FILE, h5_file=DISPLACEMENT_FILE)
+    mesh_points, mesh_connectivity, time_steps, deformations = load_mesh_and_deformations(xdmf_file=BUNNY_FILE, h5_file=displacement_file)
 
     print(f"np.shape(mesh_points) = {np.shape(mesh_points)}")
     print(f"mesh_points = \n{mesh_points}\n")
